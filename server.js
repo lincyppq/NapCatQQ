@@ -52,6 +52,10 @@ let adminConfig = {
     autoQuit: false, 
     quitWaitHours: 24,
     quitMessage: '[服务结束] 由于服务到期未续费，机器人将自动退出本群。感谢使用，江湖再见。',
+    // Custom Commands
+    cmdPrefix: 'xa',
+    cmdQuery: '查询到期',
+    cmdRenew: '续费',
     uiTheme: {
         primaryColor: '#007AFF', // Apple System Blue
         backgroundImage: '',
@@ -69,6 +73,10 @@ if (fs.existsSync(ADMIN_FILE)) {
         if (!adminConfig.uiTheme) {
             adminConfig.uiTheme = { primaryColor: '#007AFF', backgroundImage: '', overlayOpacity: 0.4 };
         }
+        // Init new fields if missing
+        if (!adminConfig.cmdPrefix) adminConfig.cmdPrefix = 'xa';
+        if (!adminConfig.cmdQuery) adminConfig.cmdQuery = '查询到期';
+        if (!adminConfig.cmdRenew) adminConfig.cmdRenew = '续费';
     } catch (e) { console.error("Failed to read admin config"); }
 } else {
     fs.writeFileSync(ADMIN_FILE, JSON.stringify(adminConfig, null, 2));
@@ -256,7 +264,11 @@ wss.on('connection', (ws, req) => {
                     const rawText = msg.raw_message || msg.message || "";
                     const groupId = msg.group_id;
                     
-                    if (rawText.startsWith('xa查询到期')) {
+                    const prefix = adminConfig.cmdPrefix || 'xa';
+                    const queryCmd = prefix + (adminConfig.cmdQuery || '查询到期');
+                    const renewCmd = prefix + (adminConfig.cmdRenew || '续费');
+
+                    if (rawText.startsWith(queryCmd)) {
                         const botData = botsDB[selfId];
                         if (botData.deleted) return; // Ignore deleted bots
 
@@ -280,7 +292,7 @@ wss.on('connection', (ws, req) => {
                         writeLog('BOT', 'AUTO_REPLY_QUERY', `To Group ${groupId}: ${replyText}`);
                     }
 
-                    if (rawText.startsWith('xa续费')) {
+                    if (rawText.startsWith(renewCmd)) {
                         ws.send(JSON.stringify({ action: 'send_group_msg', params: { group_id: groupId, message: adminConfig.renewalMessage } }));
                         writeLog('BOT', 'AUTO_REPLY_RENEW', `To Group ${groupId}`);
                     }
@@ -350,6 +362,9 @@ app.get('/api/admin/config', authenticateToken, (req, res) => {
         autoQuit: adminConfig.autoQuit,
         quitWaitHours: adminConfig.quitWaitHours,
         quitMessage: adminConfig.quitMessage,
+        cmdPrefix: adminConfig.cmdPrefix || 'xa',
+        cmdQuery: adminConfig.cmdQuery || '查询到期',
+        cmdRenew: adminConfig.cmdRenew || '续费',
         uiTheme: adminConfig.uiTheme || { primaryColor: '#007AFF', backgroundImage: '', overlayOpacity: 0.4 }
     });
 });
@@ -391,6 +406,79 @@ app.get('/api/logs', authenticateToken, (req, res) => {
 app.post('/api/backup/now', authenticateToken, (req, res) => {
     performBackup();
     res.json({ success: true });
+});
+
+app.get('/api/backups', authenticateToken, (req, res) => {
+    try {
+        const files = fs.readdirSync(BACKUPS_DIR).map(file => {
+            const stats = fs.statSync(path.join(BACKUPS_DIR, file));
+            return {
+                name: file,
+                size: (stats.size / 1024).toFixed(2) + ' KB',
+                created: stats.mtime
+            };
+        }).sort((a, b) => b.created - a.created);
+        res.json(files);
+    } catch(e) { res.json([]); }
+});
+
+app.get('/api/backup/:filename', authenticateToken, (req, res) => {
+    const filename = req.params.filename;
+    if (!filename || filename.includes('..')) return res.status(400).send('Invalid filename');
+    const filePath = path.join(BACKUPS_DIR, filename);
+    if (fs.existsSync(filePath)) {
+        res.download(filePath);
+    } else {
+        res.status(404).send('File not found');
+    }
+});
+
+// Restore Backup Endpoint
+app.post('/api/backup/restore', authenticateToken, upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    try {
+        const filePath = req.file.path;
+        const fileContent = fs.readFileSync(filePath, 'utf8');
+        const data = JSON.parse(fileContent);
+        let restoredType = 'Unknown';
+
+        // Smart detection logic
+        // 1. Check if it's Admin Config (looks for keys like username, password, uiTheme)
+        if (data.username && data.password && (data.uiTheme || data.cmdPrefix)) {
+             Object.assign(adminConfig, data);
+             saveAdminConfig();
+             restoredType = '系统配置';
+        }
+        // 2. Check if it's Bot Data (looks like a map of objects with 'contracts')
+        else if (typeof data === 'object') {
+            // Heuristic: check if at least one value has 'id' and 'contracts'
+            const keys = Object.keys(data);
+            const isBotDB = keys.length === 0 || (data[keys[0]] && (data[keys[0]].contracts || data[keys[0]].status));
+            
+            if (isBotDB) {
+                botsDB = data;
+                saveDB();
+                restoredType = '机器人数据';
+            } else {
+                 throw new Error('Unrecognized backup format');
+            }
+        } else {
+            throw new Error('Invalid JSON structure');
+        }
+
+        // Cleanup
+        fs.unlinkSync(filePath);
+
+        writeLog('USER', 'RESTORE_BACKUP', `Restored ${restoredType} from upload`);
+        res.json({ success: true, type: restoredType });
+
+    } catch (e) {
+        console.error("Restore failed:", e);
+        // Try to delete temp file if exists
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        res.status(400).json({ error: 'Invalid backup file or format' });
+    }
 });
 
 // Get active bots (exclude deleted)
@@ -479,6 +567,65 @@ app.post('/api/bot/group-info', authenticateToken, async (req, res) => {
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: e.message });
+    }
+});
+
+// Ghost Group Scan
+app.post('/api/bot/ghost-scan', authenticateToken, async (req, res) => {
+    const { botId } = req.body;
+    const ws = activeConnections.get(String(botId));
+    if (!ws || ws.readyState !== WebSocket.OPEN) return res.status(500).json({ error: 'Bot Offline' });
+
+    const echo = Date.now().toString(36) + Math.random().toString(36).substr(2);
+    const responsePromise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => { pendingRequests.delete(echo); reject(new Error('Timeout')); }, 5000); 
+        pendingRequests.set(echo, { resolve: (data) => { clearTimeout(timeout); resolve(data); }, reject });
+    });
+
+    ws.send(JSON.stringify({ action: 'get_group_list', echo }));
+
+    try {
+        const data = await responsePromise;
+        if (data.status === 'ok' && Array.isArray(data.data)) {
+            const actualGroups = data.data;
+            const botData = botsDB[botId];
+            if (!botData) return res.status(404).json({ error: 'Bot Not Found' });
+
+            const authorizedGroupIds = new Set(
+                (botData.contracts || [])
+                .filter(c => !c.deleted && !c.leftGroup)
+                .map(c => String(c.groupId))
+            );
+
+            const ghosts = actualGroups.filter(g => !authorizedGroupIds.has(String(g.group_id))).map(g => ({
+                group_id: g.group_id,
+                group_name: g.group_name,
+                member_count: g.member_count
+            }));
+
+            res.json(ghosts);
+        } else {
+            res.status(400).json({ error: 'Failed to get group list' });
+        }
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ghost Group Clean
+app.post('/api/bot/ghost-clean', authenticateToken, (req, res) => {
+    const { botId, groupIds } = req.body;
+    if (!Array.isArray(groupIds) || groupIds.length === 0) return res.json({ success: true, count: 0 });
+
+    const ws = activeConnections.get(String(botId));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        let count = 0;
+        groupIds.forEach(gid => {
+            ws.send(JSON.stringify({ action: 'set_group_leave', params: { group_id: parseInt(gid) } }));
+            count++;
+        });
+        writeLog('USER', 'GHOST_CLEAN', `Cleaned ${count} ghost groups for Bot ${botId}`);
+        res.json({ success: true, count });
+    } else {
+        res.status(500).json({ error: 'Bot Offline' });
     }
 });
 
