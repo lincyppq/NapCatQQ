@@ -116,13 +116,13 @@ body::before {
 }
 
 /* Primary Action Button */
-.btn-primary, .btn:not(.btn-secondary):not(.btn-outline):not(.btn-danger) {
+.btn-primary, .btn:not(.btn-secondary):not(.btn-outline):not(.btn-danger):not(.btn-warning) {
     background: var(--primary);
     color: white;
     box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
 }
 
-.btn-primary:hover, .btn:not(.btn-secondary):not(.btn-outline):not(.btn-danger):hover {
+.btn-primary:hover, .btn:not(.btn-secondary):not(.btn-outline):not(.btn-danger):not(.btn-warning):hover {
     background: var(--primary-hover);
     filter: brightness(1.1);
 }
@@ -145,6 +145,17 @@ body::before {
 .btn-danger:hover {
     background: var(--danger);
     color: white;
+}
+
+.btn-warning {
+    background: rgba(255, 214, 10, 0.15);
+    color: var(--warning);
+    box-shadow: inset 0 0 0 1px rgba(255, 214, 10, 0.3);
+}
+
+.btn-warning:hover {
+    background: var(--warning);
+    color: black;
 }
 
 .btn-sm {
