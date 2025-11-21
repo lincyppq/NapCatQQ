@@ -9,7 +9,6 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body>
     <div id="root"></div>
@@ -614,6 +613,24 @@
                                 </div>
                             </div>
 
+                            <div className="section-divider">自动退群策略 (高级)</div>
+                            <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1rem'}}>
+                                <label className="stat-label" style={{margin:0, fontSize:'1rem'}}>开启到期自动退群</label>
+                                <input type="checkbox" style={{transform:'scale(1.5)'}} checked={config.autoQuit||false} onChange={e=>setConfig({...config, autoQuit:e.target.checked})} />
+                            </div>
+                            {config.autoQuit && (
+                                <div style={{animation:'fadeIn 0.3s'}}>
+                                    <div className="form-group">
+                                        <label className="stat-label">到期后等待 (小时)</label>
+                                        <input type="number" className="form-control" value={config.quitWaitHours||24} onChange={e=>setConfig({...config,quitWaitHours:parseInt(e.target.value)})} />
+                                    </div>
+                                    <div className="form-group" style={{marginTop:'1rem'}}>
+                                        <label className="stat-label">退群告别语</label>
+                                        <textarea className="form-control" value={config.quitMessage||''} onChange={e=>setConfig({...config,quitMessage:e.target.value})} rows="2"></textarea>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="section-divider">回复与通知</div>
                             <div className="form-group">
                                 <label className="stat-label">到期通知内容</label>
@@ -691,6 +708,10 @@
         const SendMsgModal = ({ bot, token, apiHost, onClose }) => {
             const [gid, setGid] = useState('');
             const [msg, setMsg] = useState('');
+            const [search, setSearch] = useState('');
+            const contracts = bot.contracts || [];
+            const filteredGroups = contracts.filter(c => String(c.groupId).includes(search));
+
             const send = async () => {
                 if(!gid||!msg) return;
                 const res = await fetch(`${apiHost}/api/bot/send`, {
@@ -699,6 +720,7 @@
                 });
                 if(res.ok) { alert('发送成功'); setMsg(''); } else alert('发送失败');
             };
+
             return (
                 <div className="modal-overlay">
                     <div className="modal-content" style={{maxWidth:'500px'}}>
@@ -706,6 +728,21 @@
                         <div className="modal-body">
                             <div className="form-group"><label className="stat-label">目标群号</label><input className="form-control" value={gid} onChange={e=>setGid(e.target.value)}/></div>
                             <div className="form-group" style={{marginTop:'1rem'}}><label className="stat-label">消息内容</label><textarea className="form-control" value={msg} onChange={e=>setMsg(e.target.value)} rows="4"></textarea></div>
+                            
+                            <div className="section-divider">群列表选择</div>
+                            <input className="form-control" placeholder="🔍 搜索群号..." value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:'0.5rem'}}/>
+                            <div className="log-list" style={{maxHeight:'150px', overflowY:'auto'}}>
+                                {filteredGroups.map(c => (
+                                    <div key={c.id} className="log-item" style={{gridTemplateColumns:'1fr', cursor:'pointer', padding:'0.5rem'}} onClick={()=>setGid(c.groupId)}>
+                                        <div style={{display:'flex',justifyContent:'space-between'}}>
+                                            <span style={{fontWeight:600}}>群 {c.groupId}</span>
+                                            <span style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>{c.expireTime ? new Date(c.expireTime).toLocaleDateString() : '永久'}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                                {filteredGroups.length === 0 && <div style={{padding:'0.5rem', textAlign:'center', color:'var(--text-muted)'}}>无匹配群</div>}
+                            </div>
+
                         </div>
                         <div className="modal-actions"><button className="btn btn-secondary" onClick={onClose}>关闭</button><button className="btn btn-primary" onClick={send}>发送</button></div>
                     </div>
@@ -715,6 +752,5 @@
 
         createRoot(document.getElementById('root')).render(<App />);
     </script>
-<script type="module" src="/index.tsx"></script>
 </body>
 </html>
