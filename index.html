@@ -531,7 +531,7 @@
 
             return (
                 <div className="modal-overlay" onClick={onClose}>
-                    <div className="modal-content" onClick={e => e.stopPropagation()}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'500px'}}>
                         <div className="modal-header"><h3>系统设置</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
                         <div style={{display:'flex', borderBottom:'1px solid rgba(255,255,255,0.1)', padding:'0 1rem', overflowX:'auto'}}>
                             {['basic', 'notification', 'quit', 'security'].map(t => (
