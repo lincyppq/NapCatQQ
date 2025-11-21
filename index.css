@@ -178,6 +178,13 @@ body::before {
     box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
 }
 
+input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
 /* --- Login Screen --- */
 .login-container {
     display: flex;
