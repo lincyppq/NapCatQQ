@@ -356,6 +356,26 @@
                 });
                 refreshData();
             };
+            
+            const quitGroup = async (groupId) => {
+                if(!bot.isOnline) return alert("机器人必须在线才能执行退群操作。");
+                if(!confirm(`⚠️ 确定要强制机器人退出群 ${groupId} 吗？\n退群后如需恢复，需重新邀请机器人进群。`)) return;
+                
+                try {
+                    const res = await fetch(`${apiHost}/api/bot/quit-group`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ botId: bot.id, groupId })
+                    });
+                    if(res.ok) {
+                        alert("退群指令已发送");
+                        refreshData();
+                    } else {
+                        const d = await res.json();
+                        alert("操作失败: " + (d.error || '未知错误'));
+                    }
+                } catch(e) { alert("网络错误"); }
+            };
 
             const filteredContracts = contracts.filter(c => c.groupId.toString().includes(searchTerm));
             const hasCustomAvatar = botAvatar && (botAvatar.startsWith('http') || botAvatar.startsWith('/'));
@@ -406,12 +426,18 @@
                                                                 {isExpired?'已过期':'生效中'}
                                                             </span>
                                                         )}
+                                                        {c.leftGroup && (
+                                                            <span style={{fontSize:'0.8rem', color: 'var(--text-muted)', border: '1px solid var(--text-muted)', padding:'1px 6px', borderRadius:'6px'}}>已退群</span>
+                                                        )}
                                                     </div>
                                                     <div style={{display:'flex', alignItems:'center', gap:'1rem'}}>
                                                         <div style={{fontSize:'0.9rem', color:'var(--text-secondary)'}}>
                                                             {c.expireTime ? new Date(c.expireTime).toLocaleDateString() : '永久有效'}
                                                         </div>
                                                         <div style={{display:'flex', gap:'0.5rem'}}>
+                                                            {!c.leftGroup && isExpired && bot.isOnline && (
+                                                                <button className="btn btn-sm btn-warning" onClick={()=>quitGroup(c.groupId)} title="强制退出该群">退群</button>
+                                                            )}
                                                             <button className="btn btn-sm btn-secondary" onClick={()=>setEditingContract(c)}>编辑</button>
                                                             <button className="btn btn-sm btn-danger" onClick={()=>deleteContract(c.id)}>删除</button>
                                                         </div>
