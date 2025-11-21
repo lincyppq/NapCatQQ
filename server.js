@@ -100,7 +100,7 @@ const recordLoginAttempt = (ip, success) => {
     let record = loginAttempts.get(ip) || { count: 0, blockedUntil: 0 };
     
     if (success) {
-        loginAttempts.delete(ip); // Reset
+        loginAttempts.delete(ip); // Reset on success
     } else {
         // If previously blocked and time passed, reset
         if (record.blockedUntil && now > record.blockedUntil) {
@@ -230,6 +230,7 @@ wss.on('connection', (ws, req) => {
             saveDB();
         } else {
             botsDB[selfId].status = 'online';
+            // Restore if deleted but reconnected? No, keep it deleted until manually restored.
         }
         
         ws.on('close', () => {
@@ -257,7 +258,9 @@ wss.on('connection', (ws, req) => {
                     
                     if (rawText.startsWith('xa查询到期')) {
                         const botData = botsDB[selfId];
-                        const contract = botData?.contracts?.find(c => String(c.groupId) === String(groupId));
+                        if (botData.deleted) return; // Ignore deleted bots
+
+                        const contract = botData?.contracts?.find(c => String(c.groupId) === String(groupId) && !c.deleted);
                         let replyText = "";
                         if (!contract) {
                             replyText = "本群暂无授权记录或不在管理列表中。";
@@ -360,7 +363,7 @@ app.post('/api/admin/config', authenticateToken, (req, res) => {
 
 // Test Message Endpoint (Template Testing)
 app.post('/api/admin/test-msg', authenticateToken, (req, res) => {
-    const { targetGroup, msgType } = req.body; // msgType: 'renewal' | 'expire' | 'warning' | 'quit'
+    const { targetGroup, msgType } = req.body; 
     
     let message = '';
     if (msgType === 'renewal') message = adminConfig.renewalMessage;
@@ -369,8 +372,7 @@ app.post('/api/admin/test-msg', authenticateToken, (req, res) => {
     else if (msgType === 'quit') message = adminConfig.quitMessage;
     else return res.status(400).json({ error: 'Unknown message type' });
 
-    // Find an online bot
-    const onlineBotId = Object.keys(botsDB).find(id => activeConnections.has(id));
+    const onlineBotId = Object.keys(botsDB).find(id => activeConnections.has(id) && !botsDB[id].deleted);
     if (!onlineBotId) return res.status(503).json({ error: '没有在线的机器人实例可用于发送测试消息' });
 
     const ws = activeConnections.get(onlineBotId);
@@ -391,17 +393,32 @@ app.post('/api/backup/now', authenticateToken, (req, res) => {
     res.json({ success: true });
 });
 
+// Get active bots (exclude deleted)
 app.get('/api/bots', authenticateToken, (req, res) => {
-    const list = Object.values(botsDB).map(bot => ({
-        ...bot,
-        isOnline: activeConnections.has(String(bot.id))
-    }));
+    const list = Object.values(botsDB)
+        .filter(bot => !bot.deleted) // Filter out soft-deleted bots
+        .map(bot => ({
+            ...bot,
+            // Filter out soft-deleted contracts for the frontend
+            contracts: (bot.contracts || []).filter(c => !c.deleted),
+            isOnline: activeConnections.has(String(bot.id))
+        }));
     res.json(list);
 });
 
 app.post('/api/bot/create', authenticateToken, (req, res) => {
     const { id, name } = req.body;
-    if (botsDB[id]) return res.status(400).json({ error: 'Exists' });
+    if (botsDB[id]) {
+        if (botsDB[id].deleted) {
+            // If exists but deleted, restore it
+            botsDB[id].deleted = false;
+            botsDB[id].name = name || botsDB[id].name;
+            saveDB();
+            writeLog('USER', 'RESTORE_BOT', `Restored bot ${id} via create`);
+            return res.json({ success: true });
+        }
+        return res.status(400).json({ error: 'Exists' });
+    }
     botsDB[id] = { id: String(id), name: name || `Bot ${id}`, status: 'offline', contracts: [] };
     saveDB();
     writeLog('USER', 'ADD_BOT', `Added bot ${id}`);
@@ -514,6 +531,7 @@ app.post('/api/bot/contract/save', authenticateToken, (req, res) => {
     
     let contract = botsDB[botId].contracts.find(c => c.id === contractId);
     if (contract) {
+        // If un-deleted during save, handle that? Usually save is on active.
         if (expireTime > (contract.expireTime || 0)) {
             contract.notified = false; 
             contract.preNotified = false;
@@ -540,14 +558,19 @@ app.post('/api/bot/contract/save', authenticateToken, (req, res) => {
     res.json({ success: true });
 });
 
+// Soft Delete Contract
 app.post('/api/bot/contract/delete', authenticateToken, (req, res) => {
     const { botId, contractId } = req.body;
     if (botsDB[botId]) {
-        botsDB[botId].contracts = botsDB[botId].contracts.filter(c => c.id !== contractId);
-        saveDB();
-        writeLog('USER', 'DELETE_CONTRACT', `Deleted contract ${contractId}`);
-        res.json({ success: true });
-    } else res.status(404).json({ error: 'Not Found' });
+        const contract = botsDB[botId].contracts.find(c => c.id === contractId);
+        if (contract) {
+            contract.deleted = true;
+            contract.deletedAt = Date.now();
+            saveDB();
+            writeLog('USER', 'DELETE_CONTRACT', `Soft deleted contract ${contractId}`);
+            res.json({ success: true });
+        } else res.status(404).json({ error: 'Contract Not Found' });
+    } else res.status(404).json({ error: 'Bot Not Found' });
 });
 
 app.post('/api/bot/quit-group', authenticateToken, (req, res) => {
@@ -572,12 +595,16 @@ app.post('/api/bot/quit-group', authenticateToken, (req, res) => {
     }
 });
 
+// Soft Delete Bot
 app.post('/api/bot/delete', authenticateToken, (req, res) => {
     const { id } = req.body;
-    delete botsDB[id];
-    saveDB();
-    writeLog('USER', 'DELETE_BOT', `Deleted bot ${id}`);
-    res.json({ success: true });
+    if (botsDB[id]) {
+        botsDB[id].deleted = true;
+        botsDB[id].deletedAt = Date.now();
+        saveDB();
+        writeLog('USER', 'DELETE_BOT', `Soft deleted bot ${id}`);
+        res.json({ success: true });
+    } else res.status(404).json({ error: 'Not Found' });
 });
 
 app.post('/api/bot/send', authenticateToken, (req, res) => {
@@ -601,6 +628,78 @@ app.post('/api/upload', authenticateToken, upload.single('image'), (req, res) =>
     });
 });
 
+// --- Recycle Bin Endpoints ---
+app.get('/api/recycle-bin', authenticateToken, (req, res) => {
+    const deletedBots = Object.values(botsDB).filter(b => b.deleted);
+    // Find deleted contracts from active bots (or all bots? let's do active bots to avoid confusion if bot is deleted)
+    // Strategy: Just list deleted contracts from ALL bots.
+    let deletedContracts = [];
+    Object.values(botsDB).forEach(bot => {
+        if (bot.contracts) {
+            bot.contracts.forEach(c => {
+                if (c.deleted) {
+                    deletedContracts.push({
+                        ...c,
+                        botId: bot.id,
+                        botName: bot.name
+                    });
+                }
+            });
+        }
+    });
+    
+    res.json({ bots: deletedBots, contracts: deletedContracts });
+});
+
+app.post('/api/recycle-bin/restore', authenticateToken, (req, res) => {
+    const { type, id, botId } = req.body; // type: 'bot' or 'contract'
+    
+    if (type === 'bot') {
+        if (botsDB[id]) {
+            botsDB[id].deleted = false;
+            delete botsDB[id].deletedAt;
+            saveDB();
+            writeLog('USER', 'RESTORE', `Restored bot ${id}`);
+            res.json({ success: true });
+        } else res.status(404).json({error: 'Not found'});
+    } else if (type === 'contract') {
+        if (botsDB[botId]) {
+            const c = botsDB[botId].contracts.find(c => c.id === id);
+            if (c) {
+                c.deleted = false;
+                delete c.deletedAt;
+                saveDB();
+                writeLog('USER', 'RESTORE', `Restored contract ${id}`);
+                res.json({ success: true });
+            } else res.status(404).json({error: 'Not found'});
+        } else res.status(404).json({error: 'Bot not found'});
+    } else {
+        res.status(400).json({error: 'Invalid type'});
+    }
+});
+
+app.post('/api/recycle-bin/purge', authenticateToken, (req, res) => {
+    const { type, id, botId } = req.body;
+    
+    if (type === 'bot') {
+        if (botsDB[id]) {
+            delete botsDB[id];
+            saveDB();
+            writeLog('USER', 'PURGE', `Permanently deleted bot ${id}`);
+            res.json({ success: true });
+        } else res.status(404).json({error: 'Not found'});
+    } else if (type === 'contract') {
+        if (botsDB[botId]) {
+            botsDB[botId].contracts = botsDB[botId].contracts.filter(c => c.id !== id);
+            saveDB();
+            writeLog('USER', 'PURGE', `Permanently deleted contract ${id}`);
+            res.json({ success: true });
+        } else res.status(404).json({error: 'Bot not found'});
+    } else {
+        res.status(400).json({error: 'Invalid type'});
+    }
+});
+
 // --- Cron Jobs ---
 cron.schedule('* * * * *', () => {
     const now = Date.now();
@@ -611,10 +710,13 @@ cron.schedule('* * * * *', () => {
     const quitWaitTime = (adminConfig.quitWaitHours || 24) * 60 * 60 * 1000;
 
     Object.values(botsDB).forEach(bot => {
+        if (bot.deleted) return; // Skip deleted bots
+
         const ws = activeConnections.get(String(bot.id));
         const isOnline = ws && ws.readyState === WebSocket.OPEN;
 
         bot.contracts.forEach(c => {
+            if (c.deleted) return; // Skip deleted contracts
             if (!c.expireTime) return;
             
             // Pre-warning
@@ -660,6 +762,32 @@ cron.schedule('* * * * *', () => {
 
 cron.schedule('0 3 * * *', () => {
     performBackup();
+    
+    // Auto-purge recycle bin (> 7 days)
+    const now = Date.now();
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    let dbChanged = false;
+    
+    // Purge bots
+    const botIds = Object.keys(botsDB);
+    botIds.forEach(id => {
+        if (botsDB[id].deleted && (now - botsDB[id].deletedAt > sevenDays)) {
+            delete botsDB[id];
+            dbChanged = true;
+            console.log(`Auto purged bot ${id}`);
+        } else {
+            // Purge contracts
+            if (botsDB[id].contracts) {
+                const originalLen = botsDB[id].contracts.length;
+                botsDB[id].contracts = botsDB[id].contracts.filter(c => 
+                    !c.deleted || (now - c.deletedAt <= sevenDays)
+                );
+                if (botsDB[id].contracts.length !== originalLen) dbChanged = true;
+            }
+        }
+    });
+    
+    if (dbChanged) saveDB();
 });
 
 server.listen(PORT, '0.0.0.0', () => {
