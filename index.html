@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -13,12 +12,12 @@
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useMemo } = React;
         const { createRoot } = ReactDOM;
 
         const App = () => {
             const [token, setToken] = useState(localStorage.getItem('token'));
-            const apiHost = '';
+            const apiHost = ''; // Relative path for same-origin
 
             const handleLogin = (newToken) => {
                 setToken(newToken);
@@ -46,15 +45,12 @@
 
             const applyTheme = (theme) => {
                 const target = document.body; 
-                
                 if (theme.primaryColor) target.style.setProperty('--primary', theme.primaryColor);
-                
                 if (theme.backgroundImage) {
                     target.style.setProperty('--bg-image', `url('${theme.backgroundImage}')`);
                 } else {
                     target.style.removeProperty('--bg-image');
                 }
-                
                 if (theme.overlayOpacity !== undefined) {
                     target.style.setProperty('--bg-overlay-opacity', theme.overlayOpacity);
                 }
@@ -83,7 +79,8 @@
                         const data = await res.json();
                         onLogin(data.token);
                     } else {
-                        setError('认证失败：用户名或密码错误');
+                        const errData = await res.json();
+                        setError(errData.error || '认证失败：用户名或密码错误');
                     }
                 } catch (err) { setError(`连接失败: ${err.message}`); } 
                 finally { setLoading(false); }
@@ -149,7 +146,7 @@
                     <div className="header-ornament">
                         <div className="header-title">
                             <span>NapCat Admin</span>
-                            <span className="header-subtitle">{wsUrl}</span>
+                            <span className="header-subtitle" style={{opacity: 0.6}}>WS: {wsUrl}</span>
                         </div>
                         <div style={{width:'1px', height:'24px', background:'rgba(255,255,255,0.15)', margin:'0 8px'}}></div>
                         
@@ -243,119 +240,103 @@
                 d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
                 return d.toISOString().slice(0, 16);
             };
+
             const [groupId, setGroupId] = useState(contract ? contract.groupId : '');
-            const [groupName, setGroupName] = useState(contract ? contract.groupName : '');
-            const [expireDate, setExpireDate] = useState(contract ? toLocalISO(contract.expireTime) : '');
-            const [saving, setSaving] = useState(false);
+            const [groupName, setGroupName] = useState(contract ? (contract.groupName || '') : '');
+            const [expireTime, setExpireTime] = useState(contract ? toLocalISO(contract.expireTime) : '');
             const [avatarUrl, setAvatarUrl] = useState('');
 
-            // 根据群号更新头像链接
             useEffect(() => {
-                if (groupId && groupId.length > 5) {
-                    setAvatarUrl(`https://p.qlogo.cn/gh/${groupId}/${groupId}/100`);
-                } else {
-                    setAvatarUrl('');
-                }
-            }, [groupId]);
+                if (groupId) updateGroupInfo(groupId);
+            }, []);
 
-            const handleGroupBlur = async () => {
-                if (!groupId || groupId.length < 5) return;
-                // 如果还没有群名，尝试自动获取
+            const updateGroupInfo = (gid) => {
+                if (!gid) return;
+                setAvatarUrl(`https://p.qlogo.cn/gh/${gid}/${gid}/100`);
+                
                 if (!groupName) {
-                    try {
-                        const res = await fetch(`${apiHost}/api/bot/group-info`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify({ botId, groupId })
-                        });
-                        if (res.ok) {
-                            const data = await res.json();
-                            if (data.groupName) setGroupName(data.groupName);
-                        }
-                    } catch (e) {
-                        // Ignore error, maybe bot offline or timeout
-                    }
+                    fetch(`${apiHost}/api/bot/group-info`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
+                        body: JSON.stringify({ botId, groupId: gid })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.groupName) setGroupName(data.groupName);
+                    })
+                    .catch(() => {});
                 }
             };
 
-            const addTime = (amount, unit) => {
-                let base = expireDate ? new Date(expireDate) : new Date();
-                if(base < new Date()) base = new Date();
-                if (unit === 'day') base.setDate(base.getDate() + amount);
-                if (unit === 'month') base.setMonth(base.getMonth() + amount);
-                if (unit === 'year') base.setFullYear(base.getFullYear() + amount);
-                setExpireDate(toLocalISO(base.getTime()));
+            const handleBlur = () => {
+                updateGroupInfo(groupId);
             };
 
-            const handleSave = async () => {
-                if(!groupId) return alert("请填写群号");
-                setSaving(true);
-                try {
-                    const res = await fetch(`${apiHost}/api/bot/contract/save`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({
-                            botId, contractId: contract?.id, groupId, groupName,
-                            expireTime: expireDate ? new Date(expireDate).getTime() : null
-                        })
-                    });
-                    if(res.ok) onSave(); else alert("保存失败");
-                } catch(e) { alert("网络错误"); } finally { setSaving(false); }
+            const handleSave = () => {
+                if (!groupId) return alert('请输入群号');
+                onSave({
+                    contractId: contract?.id,
+                    groupId,
+                    groupName,
+                    expireTime: expireTime ? new Date(expireTime).getTime() : null
+                });
+            };
+
+            const addTime = (days) => {
+                const current = expireTime ? new Date(expireTime) : new Date();
+                current.setDate(current.getDate() + days);
+                setExpireTime(toLocalISO(current.getTime()));
             };
 
             return (
-                <div style={{animation: 'fadeIn 0.3s'}}>
-                    <div className="section-divider">{contract ? '编辑授权' : '新建授权'}</div>
-                    <div style={{display:'flex', gap:'1rem', alignItems:'flex-start'}}>
-                        {avatarUrl && (
-                            <img src={avatarUrl} style={{width:'60px', height:'60px', borderRadius:'50%', border:'2px solid rgba(255,255,255,0.1)'}} alt="Group" onError={(e)=>e.target.style.display='none'}/>
-                        )}
+                <div className="contract-editor" style={{background:'rgba(255,255,255,0.03)', padding:'1.5rem', borderRadius:'var(--radius-md)', marginTop:'1rem'}}>
+                    <h4 style={{marginBottom:'1rem'}}>{contract ? '编辑授权' : '新增授权'}</h4>
+                    <div className="form-group" style={{display:'flex', gap:'1rem', alignItems:'center'}}>
+                        <div className="group-avatar" style={{width:'50px', height:'50px', flexShrink:0}}>
+                            {avatarUrl ? <img src={avatarUrl} alt="G" style={{width:'100%', height:'100%', borderRadius:'50%'}} onError={e=>e.target.style.display='none'}/> : <div style={{width:'100%',height:'100%',background:'rgba(255,255,255,0.1)',borderRadius:'50%'}}></div>}
+                        </div>
                         <div style={{flex:1}}>
-                            <div className="form-group">
-                                <label className="stat-label">目标群号 (输入后自动匹配)</label>
-                                <input className="form-control" type="number" value={groupId} onChange={e=>setGroupId(e.target.value)} onBlur={handleGroupBlur} placeholder="QQ Group ID" />
-                            </div>
+                            <label className="stat-label">目标群号</label>
+                            <input type="number" className="form-control" value={groupId} onChange={e => setGroupId(e.target.value)} onBlur={handleBlur} placeholder="12345678" />
+                        </div>
+                        <div style={{flex:1.5}}>
+                            <label className="stat-label">群备注/名称</label>
+                            <input type="text" className="form-control" value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="自动获取或手动输入" />
                         </div>
                     </div>
                     
                     <div className="form-group" style={{marginTop:'1rem'}}>
-                        <label className="stat-label">群备注/名称</label>
-                        <input className="form-control" value={groupName} onChange={e=>setGroupName(e.target.value)} placeholder="输入群号后尝试自动获取..." />
+                        <label className="stat-label">到期时间 (留空则永久)</label>
+                        <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap'}}>
+                            <input type="datetime-local" className="form-control" style={{flex:1, minWidth:'200px'}} value={expireTime} onChange={e => setExpireTime(e.target.value)} />
+                            <button className="btn btn-sm btn-secondary" onClick={() => addTime(30)}>+1月</button>
+                            <button className="btn btn-sm btn-secondary" onClick={() => addTime(90)}>+1季</button>
+                            <button className="btn btn-sm btn-secondary" onClick={() => addTime(365)}>+1年</button>
+                        </div>
                     </div>
 
-                    <div className="form-group" style={{marginTop:'1rem'}}>
-                        <label className="stat-label">到期时间</label>
-                        <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap', marginBottom:'0.5rem'}}>
-                            <button className="btn btn-sm btn-secondary" onClick={()=>addTime(1,'day')}>+1天</button>
-                            <button className="btn btn-sm btn-secondary" onClick={()=>addTime(1,'month')}>+1月</button>
-                            <button className="btn btn-sm btn-secondary" onClick={()=>addTime(1,'year')}>+1年</button>
-                            <button className="btn btn-sm btn-secondary" onClick={()=>setExpireDate('')}>永久</button>
-                        </div>
-                        <input type="datetime-local" className="form-control" value={expireDate} onChange={e=>setExpireDate(e.target.value)} />
-                    </div>
-                    <div style={{display:'flex', justifyContent:'flex-end', gap:'0.5rem', marginTop:'2rem'}}>
+                    <div style={{display:'flex', justifyContent:'flex-end', gap:'0.5rem', marginTop:'1.5rem'}}>
                         <button className="btn btn-secondary" onClick={onCancel}>取消</button>
-                        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>保存配置</button>
+                        <button className="btn btn-primary" onClick={handleSave}>保存授权</button>
                     </div>
                 </div>
             );
         };
 
         const EditBotModal = ({ bot, token, apiHost, onClose, onSuccess }) => {
+            const [name, setName] = useState(bot.name);
+            const [avatar, setAvatar] = useState(bot.avatar || '');
             const [contracts, setContracts] = useState(bot.contracts || []);
-            const [botName, setBotName] = useState(bot.name);
-            const [botAvatar, setBotAvatar] = useState(bot.avatar || '');
-            const [editingContract, setEditingContract] = useState(null); 
+            const [editingContract, setEditingContract] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
             const [realTimeGroups, setRealTimeGroups] = useState(new Set());
-            const avatarInputRef = useRef(null);
-            
-            // 打开时检测机器人实际在群列表
+            const fileInputRef = useRef(null);
+
             useEffect(() => {
                 if (bot.isOnline) {
                     fetch(`${apiHost}/api/bot/group-list`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
                         body: JSON.stringify({ botId: bot.id })
                     })
                     .then(res => res.json())
@@ -364,197 +345,520 @@
                             setRealTimeGroups(new Set(data.map(g => String(g.group_id))));
                         }
                     })
-                    .catch(e => console.warn("Check groups failed", e));
+                    .catch(err => console.error(err));
                 }
-            }, []);
+            }, [bot]);
 
-            const refreshData = async () => {
-                const res = await fetch(`${apiHost}/api/bots`, { headers: { 'Authorization': `Bearer ${token}` } });
-                const data = await res.json();
-                const freshBot = data.find(b => b.id === bot.id);
-                if (freshBot) {
-                    setContracts(freshBot.contracts || []);
-                    setBotName(freshBot.name);
-                    setBotAvatar(freshBot.avatar || '');
-                }
-            };
-
-            const updateBotInfo = async () => {
+            const handleSaveInfo = async () => {
                 await fetch(`${apiHost}/api/bot/update-info`, {
-                    method: 'POST', headers: {'Content-Type':'application/json','Authorization':`Bearer ${token}`},
-                    body: JSON.stringify({ id: bot.id, name: botName, avatar: botAvatar })
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ id: bot.id, name, avatar })
                 });
                 onSuccess();
-                alert('保存成功');
             };
 
-            const handleAvatarUpload = async (e) => {
+            const handleUploadAvatar = async (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-                const fd = new FormData();
-                fd.append('image', file);
+                const formData = new FormData();
+                formData.append('image', file);
                 try {
-                    const res = await fetch(`${apiHost}/api/upload`, { method:'POST', headers:{'Authorization':`Bearer ${token}`}, body:fd });
-                    if(res.ok) {
-                        const d = await res.json();
-                        setBotAvatar(d.url); // 使用 Web URL
-                    }
-                } catch(err) { console.error(err); alert('头像上传失败'); }
+                    const res = await fetch(`${apiHost}/api/upload`, {
+                        method: 'POST', headers: { 'Authorization': `Bearer ${token}` },
+                        body: formData
+                    });
+                    const data = await res.json();
+                    setAvatar(data.url);
+                } catch (err) { alert('上传失败'); }
             };
 
-            const deleteBot = async () => {
-                if(!confirm(`确定删除 ${bot.name} 吗？`)) return;
-                await fetch(`${apiHost}/api/bot/delete`, {
-                    method: 'POST', headers: {'Content-Type':'application/json', 'Authorization':`Bearer ${token}`},
-                    body: JSON.stringify({ id: bot.id })
+            const handleSaveContract = async (cData) => {
+                await fetch(`${apiHost}/api/bot/contract/save`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ botId: bot.id, ...cData })
                 });
-                onSuccess(); onClose();
+                onSuccess();
+                fetchBots();
+                setEditingContract(null);
             };
 
-            const deleteContract = async (contractId) => {
-                if(!confirm("确定删除此授权？")) return;
+            const fetchBots = async () => {
+                onSuccess();
+            };
+
+            const handleDeleteContract = async (contractId) => {
+                if (!confirm('确定删除此授权？')) return;
                 await fetch(`${apiHost}/api/bot/contract/delete`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ botId: bot.id, contractId })
                 });
-                refreshData();
+                onSuccess();
             };
-            
-            const quitGroup = async (groupId) => {
-                if(!bot.isOnline) return alert("机器人必须在线才能执行退群操作。");
-                if(!confirm(`⚠️ 确定要强制机器人退出群 ${groupId} 吗？\n退群后如需恢复，需重新邀请机器人进群。`)) return;
-                
+
+            const handleQuitGroup = async (groupId) => {
+                if (!confirm(`确定要让机器人退出群 ${groupId} 吗？此操作不可逆。`)) return;
                 try {
                     const res = await fetch(`${apiHost}/api/bot/quit-group`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify({ botId: bot.id, groupId })
                     });
-                    if(res.ok) {
-                        alert("退群指令已发送");
-                        refreshData();
+                    if (res.ok) {
+                        alert('已发送退群指令');
+                        onSuccess();
                     } else {
-                        const d = await res.json();
-                        alert("操作失败: " + (d.error || '未知错误'));
+                        alert('操作失败，机器人可能不在线');
                     }
-                } catch(e) { alert("网络错误"); }
+                } catch(e) { alert(e.message); }
             };
 
             const filteredContracts = contracts.filter(c => 
-                c.groupId.toString().includes(searchTerm) || 
-                (c.groupName && c.groupName.includes(searchTerm))
+                String(c.groupId).includes(searchTerm) || (c.groupName && c.groupName.includes(searchTerm))
             );
-            const hasCustomAvatar = botAvatar && (botAvatar.startsWith('http') || botAvatar.startsWith('/'));
 
             return (
-                <div className="modal-overlay">
-                    <div className="modal-content" style={{maxWidth:'800px', height:'600px'}}>
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'800px'}}>
                         <div className="modal-header">
-                            <div style={{display:'flex',alignItems:'center',gap:'1rem'}}>
-                                <input type="file" ref={avatarInputRef} style={{display:'none'}} onChange={handleAvatarUpload} />
-                                <div 
-                                    className="bot-avatar" 
-                                    style={{width:44,height:44,fontSize:'1.2rem',cursor:'pointer',flexShrink:0}}
-                                    onClick={() => avatarInputRef.current.click()}
-                                    title="点击更换头像"
-                                >
-                                    {hasCustomAvatar ? 
-                                        <img src={botAvatar} alt="avatar" onError={(e)=>{e.target.style.display='none';e.target.parentElement.innerText='🤖'}}/> 
-                                        : (botAvatar || '🤖')
-                                    }
-                                </div>
-                                <div style={{display:'flex',gap:'0.5rem'}}>
-                                    <input className="form-control" style={{padding:'0.4rem 0.8rem',width:'160px'}} value={botName} onChange={e=>setBotName(e.target.value)} />
-                                    <button className="btn btn-sm btn-secondary" onClick={updateBotInfo}>保存</button>
-                                </div>
-                            </div>
-                            <div style={{display:'flex', gap:'0.5rem'}}>
-                                <button className="btn btn-sm btn-danger" onClick={deleteBot}>删除实例</button>
-                                <button className="btn btn-sm btn-secondary" onClick={onClose}>关闭</button>
-                            </div>
+                            <h3>配置机器人: {bot.name}</h3>
+                            <button className="nav-btn" onClick={onClose}>✕</button>
                         </div>
-                        <div className="modal-body">
-                            {!editingContract ? (
-                                <>
-                                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:'1.5rem'}}>
-                                        <input className="form-control" style={{width:'240px'}} placeholder="🔍 搜索群号/群名..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-                                        <button className="btn btn-primary" onClick={()=>setEditingContract('new')}>＋ 添加授权</button>
+                        <div className="modal-body" style={{display:'flex', gap:'2rem', flexDirection:'column'}}>
+                            {/* Top: Info & Avatar */}
+                            <div style={{display:'flex', gap:'1.5rem', alignItems:'center', background:'rgba(255,255,255,0.03)', padding:'1rem', borderRadius:'var(--radius-md)'}}>
+                                <div style={{position:'relative'}}>
+                                    <div className="bot-avatar" style={{width:'80px', height:'80px', fontSize:'2.5rem'}} onClick={() => fileInputRef.current.click()}>
+                                        {avatar && (avatar.startsWith('http') || avatar.startsWith('/')) ? <img src={avatar} /> : (avatar || '👾')}
                                     </div>
-                                    <div className="contract-list">
+                                    <input type="file" ref={fileInputRef} style={{display:'none'}} accept="image/*" onChange={handleUploadAvatar} />
+                                    <div style={{fontSize:'0.7rem', textAlign:'center', marginTop:'0.5rem', color:'var(--primary)', cursor:'pointer'}} onClick={() => fileInputRef.current.click()}>更换头像</div>
+                                    {avatar && <div style={{fontSize:'0.7rem', textAlign:'center', marginTop:'0.2rem', color:'var(--danger)', cursor:'pointer'}} onClick={() => setAvatar('')}>清除</div>}
+                                </div>
+                                <div style={{flex:1}}>
+                                    <div className="form-group">
+                                        <label className="stat-label">机器人名称</label>
+                                        <input className="form-control" value={name} onChange={e => setName(e.target.value)} />
+                                    </div>
+                                </div>
+                                <button className="btn btn-primary" onClick={handleSaveInfo}>保存信息</button>
+                            </div>
+
+                            {/* Bottom: Contracts */}
+                            <div>
+                                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem'}}>
+                                    <h4 style={{margin:0}}>租户/授权管理 ({contracts.length})</h4>
+                                    <div style={{display:'flex', gap:'0.5rem'}}>
+                                        <input 
+                                            type="text" 
+                                            className="form-control" 
+                                            style={{padding:'0.4rem 0.8rem', width:'150px', fontSize:'0.9rem'}} 
+                                            placeholder="🔍 搜索群号/名称"
+                                            value={searchTerm}
+                                            onChange={e=>setSearchTerm(e.target.value)}
+                                        />
+                                        <button className="btn btn-sm btn-primary" onClick={() => setEditingContract({})}>+ 添加授权</button>
+                                    </div>
+                                </div>
+
+                                {editingContract ? (
+                                    <ContractEditor 
+                                        contract={editingContract.id ? editingContract : null} 
+                                        botId={bot.id} 
+                                        token={token} apiHost={apiHost}
+                                        onSave={handleSaveContract} 
+                                        onCancel={() => setEditingContract(null)} 
+                                    />
+                                ) : (
+                                    <div className="contract-list" style={{maxHeight:'400px', overflowY:'auto'}}>
                                         {filteredContracts.map(c => {
                                             const isExpired = c.expireTime && Date.now() > c.expireTime;
-                                            const groupAvatarUrl = `https://p.qlogo.cn/gh/${c.groupId}/${c.groupId}/100`;
-                                            // 检查机器人是否实际在群内 (仅在机器人在线时检测)
-                                            const isInGroup = bot.isOnline ? realTimeGroups.has(String(c.groupId)) : true;
-                                            
+                                            const daysLeft = c.expireTime ? Math.ceil((c.expireTime - Date.now()) / (1000 * 60 * 60 * 24)) : '∞';
+                                            const isMissing = bot.isOnline && !c.leftGroup && !realTimeGroups.has(String(c.groupId));
+
                                             return (
-                                                <div key={c.id} className="contract-item">
-                                                    <div style={{display:'flex', gap:'0.5rem', alignItems:'center', flex:1}}>
-                                                        <img src={groupAvatarUrl} className="group-avatar" alt="Group" onError={(e)=>e.target.src='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>'}/>
+                                                <div className="contract-item" key={c.id}>
+                                                    <div style={{display:'flex', alignItems:'center', gap:'1rem'}}>
+                                                        <img 
+                                                            className="group-avatar" 
+                                                            src={`https://p.qlogo.cn/gh/${c.groupId}/${c.groupId}/100`} 
+                                                            onError={e=>e.target.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'} 
+                                                        />
                                                         <div>
-                                                            <div style={{fontWeight:'600', fontSize:'1rem', display:'flex', alignItems:'center', gap:'8px'}}>
-                                                                {c.groupName || '未命名群'}
+                                                            <div style={{fontWeight:'600', display:'flex', alignItems:'center', gap:'0.5rem'}}>
+                                                                {c.groupName || `群 ${c.groupId}`}
                                                                 {c.leftGroup && <span className="tag-left">已退群</span>}
-                                                                {!c.leftGroup && !isInGroup && bot.isOnline && <span className="tag-missing">⚠️ 机器人不在该群</span>}
+                                                                {isMissing && <span className="tag-missing">⚠️ 机器人不在该群</span>}
                                                             </div>
-                                                            <div style={{fontSize:'0.8rem', color:'var(--text-secondary)', marginTop:'2px'}}>ID: {c.groupId}</div>
+                                                            <div style={{fontSize:'0.85rem', color:'var(--text-secondary)', marginTop:'2px'}}>
+                                                                ID: {c.groupId} · {isExpired ? <span style={{color:'var(--danger)'}}>已过期</span> : <span style={{color:'var(--success)'}}>剩余 {daysLeft} 天</span>}
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                    
-                                                    <div style={{display:'flex', alignItems:'center', gap:'1rem'}}>
-                                                        <div style={{textAlign:'right'}}>
-                                                            <div style={{fontSize:'0.9rem', color: isExpired ? 'var(--danger)' : 'var(--success)'}}>
-                                                                {c.expireTime ? (isExpired?'已过期':'生效中') : '永久有效'}
-                                                            </div>
-                                                            <div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>
-                                                                {c.expireTime ? new Date(c.expireTime).toLocaleDateString() : '∞'}
-                                                            </div>
-                                                        </div>
-                                                        <div style={{display:'flex', gap:'0.5rem'}}>
-                                                            {!c.leftGroup && isExpired && bot.isOnline && isInGroup && (
-                                                                <button className="btn btn-sm btn-warning" onClick={()=>quitGroup(c.groupId)} title="强制退出该群">退群</button>
-                                                            )}
-                                                            <button className="btn btn-sm btn-secondary" onClick={()=>setEditingContract(c)}>编辑</button>
-                                                            <button className="btn btn-sm btn-danger" onClick={()=>deleteContract(c.id)}>删除</button>
-                                                        </div>
+                                                    <div style={{display:'flex', gap:'0.5rem'}}>
+                                                        {!c.leftGroup && bot.isOnline && (
+                                                            <button className="btn btn-sm btn-warning" onClick={() => handleQuitGroup(c.groupId)} title="退出该群">退群</button>
+                                                        )}
+                                                        <button className="btn btn-sm btn-secondary" onClick={() => setEditingContract(c)}>续期/编辑</button>
+                                                        <button className="btn btn-sm btn-danger" onClick={() => handleDeleteContract(c.id)}>删除</button>
                                                     </div>
                                                 </div>
                                             );
                                         })}
-                                        {filteredContracts.length === 0 && <div style={{textAlign:'center',color:'var(--text-muted)',padding:'2rem'}}>未找到相关授权记录</div>}
+                                        {filteredContracts.length === 0 && <div style={{textAlign:'center', padding:'2rem', color:'var(--text-muted)'}}>无匹配记录</div>}
                                     </div>
-                                </>
-                            ) : (
-                                <ContractEditor contract={editingContract==='new'?null:editingContract} botId={bot.id} token={token} apiHost={apiHost} onSave={()=>{setEditingContract(null);refreshData();}} onCancel={()=>setEditingContract(null)} />
-                            )}
+                                )}
+                            </div>
+
+                            <div style={{textAlign:'right', marginTop:'1rem'}}>
+                                <button className="btn btn-danger" style={{fontSize:'0.9rem', opacity:0.8}} onClick={async () => {
+                                    if(confirm('确定删除此机器人实例？')) {
+                                        await fetch(`${apiHost}/api/bot/delete`, {
+                                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                            body: JSON.stringify({ id: bot.id })
+                                        });
+                                        onClose();
+                                        onSuccess();
+                                    }
+                                }}>删除实例</button>
+                            </div>
                         </div>
                     </div>
                 </div>
             );
         };
 
+        const SendMsgModal = ({ bot, token, apiHost, onClose }) => {
+            const [groupId, setGroupId] = useState('');
+            const [message, setMessage] = useState('');
+            const [searchTerm, setSearchTerm] = useState('');
+
+            const handleSend = async () => {
+                if (!groupId || !message) return;
+                try {
+                    await fetch(`${apiHost}/api/bot/send`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ id: bot.id, group_id: groupId, message })
+                    });
+                    alert('已发送');
+                    onClose();
+                } catch (e) { alert('发送失败'); }
+            };
+
+            const contracts = bot.contracts || [];
+            const filteredGroups = contracts.filter(c => 
+                String(c.groupId).includes(searchTerm) || (c.groupName && c.groupName.includes(searchTerm))
+            );
+
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'500px'}}>
+                        <div className="modal-header">
+                            <h3>发送消息 ({bot.name})</h3>
+                            <button className="nav-btn" onClick={onClose}>✕</button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="form-group">
+                                <label className="stat-label">目标群号</label>
+                                <input className="form-control" type="number" value={groupId} onChange={e => setGroupId(e.target.value)} placeholder="输入或从下方选择" />
+                            </div>
+                            
+                            <div style={{marginTop:'1rem', marginBottom:'1.5rem'}}>
+                                <label className="stat-label">快速选择 ({filteredGroups.length})</label>
+                                <input 
+                                    className="form-control" 
+                                    style={{fontSize:'0.85rem', padding:'0.5rem', marginBottom:'0.5rem'}} 
+                                    placeholder="🔍 搜索已授权群"
+                                    value={searchTerm}
+                                    onChange={e => setSearchTerm(e.target.value)}
+                                />
+                                <div style={{maxHeight:'150px', overflowY:'auto', background:'rgba(0,0,0,0.2)', borderRadius:'var(--radius-sm)', border:'1px solid rgba(255,255,255,0.1)'}}>
+                                    {filteredGroups.map(c => (
+                                        <div 
+                                            key={c.id} 
+                                            style={{padding:'8px 12px', borderBottom:'1px solid rgba(255,255,255,0.05)', cursor:'pointer', display:'flex', justifyContent:'space-between', fontSize:'0.9rem'}}
+                                            onClick={() => setGroupId(c.groupId)}
+                                            className="contract-item"
+                                        >
+                                            <span>{c.groupName || c.groupId}</span>
+                                            <span style={{color:'var(--text-muted)'}}>{c.groupId}</span>
+                                        </div>
+                                    ))}
+                                    {filteredGroups.length === 0 && <div style={{padding:'10px', textAlign:'center', color:'var(--text-muted)', fontSize:'0.8rem'}}>无匹配群组</div>}
+                                </div>
+                            </div>
+
+                            <div className="form-group">
+                                <label className="stat-label">消息内容</label>
+                                <textarea className="form-control" rows="4" value={message} onChange={e => setMessage(e.target.value)}></textarea>
+                            </div>
+                        </div>
+                        <div className="modal-actions">
+                            <button className="btn btn-secondary" onClick={onClose}>取消</button>
+                            <button className="btn btn-primary" onClick={handleSend}>发送</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AdminSettingsModal = ({ token, apiHost, onClose, onLogout, applyTheme }) => {
+            const [config, setConfig] = useState(null);
+            const [tab, setTab] = useState('basic'); 
+            const [passData, setPassData] = useState({ newUsername: '', newPassword: '' });
+            const [testTargetId, setTestTargetId] = useState('');
+            
+            useEffect(() => {
+                fetch(`${apiHost}/api/admin/config`, { headers: { 'Authorization': `Bearer ${token}` } })
+                    .then(r => r.json())
+                    .then(setConfig);
+            }, []);
+
+            const handleSaveConfig = async () => {
+                await fetch(`${apiHost}/api/admin/config`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(config)
+                });
+                if (config.uiTheme) applyTheme(config.uiTheme); 
+                alert('配置已保存');
+            };
+
+            const handleChangePassword = async () => {
+                if (!passData.newUsername || !passData.newPassword) return;
+                await fetch(`${apiHost}/api/admin/change-password`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(passData)
+                });
+                alert('修改成功，请重新登录');
+                onLogout();
+            };
+
+            const handleBackup = async () => {
+                await fetch(`${apiHost}/api/backup/now`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+                alert('备份已创建');
+            };
+
+            const uploadBg = async (e) => {
+                const file = e.target.files[0];
+                if(!file) return;
+                const fd = new FormData();
+                fd.append('image', file);
+                const res = await fetch(`${apiHost}/api/upload`, {method:'POST',headers:{'Authorization':`Bearer ${token}`}, body:fd});
+                const d = await res.json();
+                setConfig({...config, uiTheme: {...config.uiTheme, backgroundImage: d.url}});
+            };
+
+            const handleTestMsg = async (type) => {
+                if (!testTargetId) return alert('请输入测试群号');
+                try {
+                    const res = await fetch(`${apiHost}/api/admin/test-msg`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ targetGroup: testTargetId, msgType: type })
+                    });
+                    if(res.ok) alert('消息已发送');
+                    else {
+                        const d = await res.json();
+                        alert(d.error || '发送失败');
+                    }
+                } catch(e) { alert('请求失败'); }
+            };
+
+            if (!config) return null;
+
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3>系统设置</h3>
+                            <button className="nav-btn" onClick={onClose}>✕</button>
+                        </div>
+                        <div style={{display:'flex', borderBottom:'1px solid rgba(255,255,255,0.1)', padding:'0 1.5rem'}}>
+                            {['basic', 'notification', 'quit', 'security'].map(t => (
+                                <div 
+                                    key={t}
+                                    style={{
+                                        padding:'1rem', 
+                                        cursor:'pointer', 
+                                        color: tab===t ? 'var(--primary)' : 'var(--text-secondary)',
+                                        borderBottom: tab===t ? '2px solid var(--primary)' : 'none',
+                                        fontWeight: tab===t ? '600' : '400'
+                                    }}
+                                    onClick={() => setTab(t)}
+                                >
+                                    {{basic:'基础 & UI', notification:'通知 & 交互', quit:'自动退群', security:'账号安全'}[t]}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="modal-body">
+                            {tab === 'basic' && (
+                                <>
+                                    <div className="section-divider">备份管理</div>
+                                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', background:'rgba(255,255,255,0.03)', padding:'1rem', borderRadius:'var(--radius-sm)'}}>
+                                        <div>
+                                            <div style={{fontWeight:600}}>数据备份</div>
+                                            <div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>保留最近 {config.backupRetentionDays} 天的数据</div>
+                                        </div>
+                                        <button className="btn btn-secondary" onClick={handleBackup}>立即备份</button>
+                                    </div>
+
+                                    <div className="section-divider">🎨 个性化 (UI)</div>
+                                    <div className="form-group">
+                                        <label className="stat-label">主题主色 (Primary Color)</label>
+                                        <div style={{display:'flex', gap:'0.5rem'}}>
+                                            {['#007AFF', '#BF5AF2', '#30D158', '#FF9500', '#FF453A', '#0A84FF', '#64D2FF'].map(c => (
+                                                <div 
+                                                    key={c}
+                                                    onClick={() => setConfig({...config, uiTheme: {...config.uiTheme, primaryColor: c}})}
+                                                    style={{
+                                                        width:'30px', height:'30px', borderRadius:'50%', background:c, cursor:'pointer',
+                                                        border: config.uiTheme.primaryColor === c ? '2px solid white' : 'none',
+                                                        boxShadow: '0 2px 5px rgba(0,0,0,0.3)'
+                                                    }}
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="form-group" style={{marginTop:'1rem'}}>
+                                        <label className="stat-label">背景图片 (URL)</label>
+                                        <div style={{display:'flex', gap:'0.5rem'}}>
+                                            <input 
+                                                className="form-control" 
+                                                value={config.uiTheme.backgroundImage || ''} 
+                                                onChange={e => setConfig({...config, uiTheme: {...config.uiTheme, backgroundImage: e.target.value}})} 
+                                                placeholder="https://..."
+                                            />
+                                            <label className="btn btn-secondary" style={{marginBottom:0}}>
+                                                上传
+                                                <input type="file" style={{display:'none'}} onChange={uploadBg} accept="image/*" />
+                                            </label>
+                                            <button className="btn btn-danger" onClick={() => setConfig({...config, uiTheme: {...config.uiTheme, backgroundImage: ''}})}>重置</button>
+                                        </div>
+                                    </div>
+                                    <div className="form-group" style={{marginTop:'1rem'}}>
+                                        <label className="stat-label">背景遮罩浓度: {config.uiTheme.overlayOpacity}</label>
+                                        <input 
+                                            type="range" min="0" max="1" step="0.1" style={{width:'100%'}}
+                                            value={config.uiTheme.overlayOpacity} 
+                                            onChange={e => setConfig({...config, uiTheme: {...config.uiTheme, overlayOpacity: parseFloat(e.target.value)}})} 
+                                        />
+                                    </div>
+                                </>
+                            )}
+
+                            {tab === 'notification' && (
+                                <>
+                                    <div className="section-divider">消息测试实验室</div>
+                                    <div style={{background:'rgba(255,255,255,0.03)', padding:'1rem', borderRadius:'var(--radius-sm)', marginBottom:'1.5rem'}}>
+                                        <div className="form-group">
+                                            <label className="stat-label">测试目标群号</label>
+                                            <div style={{display:'flex', gap:'0.5rem'}}>
+                                                <input className="form-control" type="number" value={testTargetId} onChange={e=>setTestTargetId(e.target.value)} placeholder="请输入真实存在的群号用于测试" />
+                                            </div>
+                                        </div>
+                                        <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap', marginTop:'0.5rem'}}>
+                                            <button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('warning')}>发送预警</button>
+                                            <button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('expire')}>发送到期</button>
+                                            <button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('renewal')}>发送续费</button>
+                                            <button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('quit')}>发送退群语</button>
+                                        </div>
+                                    </div>
+
+                                    <div className="section-divider">到期预警</div>
+                                    <div className="form-group">
+                                        <label className="stat-label">提前通知天数</label>
+                                        <input type="number" className="form-control" value={config.warningDays} onChange={e => setConfig({...config, warningDays: parseInt(e.target.value)})} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="stat-label">预警内容</label>
+                                        <textarea className="form-control" rows="2" value={config.warningMessage} onChange={e => setConfig({...config, warningMessage: e.target.value})} />
+                                    </div>
+
+                                    <div className="section-divider">正式到期</div>
+                                    <div className="form-group">
+                                        <label className="stat-label">到期通知内容</label>
+                                        <textarea className="form-control" rows="3" value={config.defaultNotifyMessage} onChange={e => setConfig({...config, defaultNotifyMessage: e.target.value})} />
+                                    </div>
+                                    
+                                    <div className="section-divider">自动回复 (指令: xa续费)</div>
+                                    <div className="form-group">
+                                        <label className="stat-label">续费指引文案</label>
+                                        <textarea className="form-control" rows="3" value={config.renewalMessage} onChange={e => setConfig({...config, renewalMessage: e.target.value})} />
+                                    </div>
+                                </>
+                            )}
+                            
+                            {tab === 'quit' && (
+                                <>
+                                    <div className="section-divider">自动退群策略</div>
+                                    <div style={{display:'flex', alignItems:'center', gap:'1rem', marginBottom:'1rem'}}>
+                                        <label className="switch">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={config.autoQuit} 
+                                                onChange={e => setConfig({...config, autoQuit: e.target.checked})} 
+                                            />
+                                            <span className="slider round"></span>
+                                        </label>
+                                        <span style={{color: config.autoQuit ? 'var(--success)' : 'var(--text-muted)'}}>
+                                            {config.autoQuit ? '已开启' : '已关闭'}
+                                        </span>
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="stat-label">到期后等待时间 (小时)</label>
+                                        <input type="number" className="form-control" value={config.quitWaitHours} onChange={e => setConfig({...config, quitWaitHours: parseInt(e.target.value)})} />
+                                        <div style={{fontSize:'0.8rem', color:'var(--text-secondary)', marginTop:'4px'}}>* 超过此时间未续费将自动退群</div>
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="stat-label">退群告别语</label>
+                                        <textarea className="form-control" rows="2" value={config.quitMessage} onChange={e => setConfig({...config, quitMessage: e.target.value})} />
+                                    </div>
+                                </>
+                            )}
+
+                            {tab === 'security' && (
+                                <>
+                                    <div className="section-divider">修改管理员账号</div>
+                                    <div className="form-group">
+                                        <label className="stat-label">新用户名</label>
+                                        <input className="form-control" value={passData.newUsername} onChange={e => setPassData({...passData, newUsername: e.target.value})} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="stat-label">新密码</label>
+                                        <input className="form-control" value={passData.newPassword} onChange={e => setPassData({...passData, newPassword: e.target.value})} />
+                                    </div>
+                                    <button className="btn btn-primary" style={{marginTop:'1rem'}} onClick={handleChangePassword}>更新账号信息</button>
+                                </>
+                            )}
+                        </div>
+                        <div className="modal-actions">
+                            <button className="btn btn-primary" onClick={handleSaveConfig}>保存配置</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        
         const LogViewerModal = ({ token, apiHost, onClose }) => {
             const [logs, setLogs] = useState([]);
             useEffect(() => {
                 fetch(`${apiHost}/api/logs`, { headers: { 'Authorization': `Bearer ${token}` } })
-                    .then(res => res.json()).then(setLogs);
+                    .then(r => r.json()).then(setLogs);
             }, []);
 
             return (
-                <div className="modal-overlay">
-                    <div className="modal-content" style={{maxWidth:'900px', height:'80vh'}}>
-                        <div className="modal-header"><h3>📜 日志</h3><button className="btn btn-sm btn-secondary" onClick={onClose}>关闭</button></div>
-                        <div className="modal-body" style={{padding:0}}>
-                            <div className="log-list" style={{border:'none', borderRadius:0, height:'100%'}}>
-                                {logs.map(l => (
-                                    <div key={l.id} className="log-item">
-                                        <div style={{color:'var(--text-muted)', fontFamily:'monospace'}}>{new Date(l.time).toLocaleString()}</div>
-                                        <div className={`log-type ${l.type}`}>{l.type}</div>
-                                        <div style={{fontWeight:600}}>{l.action}</div>
-                                        <div style={{color:'var(--text-secondary)', wordBreak:'break-all'}}>{l.details}</div>
-                                    </div>
-                                ))}
-                            </div>
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3>审计日志</h3>
+                            <button className="nav-btn" onClick={onClose}>✕</button>
+                        </div>
+                        <div className="modal-body log-list" style={{maxHeight:'60vh', overflowY:'auto'}}>
+                            {logs.map(log => (
+                                <div key={log.id} className="log-item">
+                                    <div style={{fontSize:'0.85rem', color:'var(--text-secondary)'}}>{new Date(log.time).toLocaleString()}</div>
+                                    <div className={`log-type ${log.type}`}>{log.type}</div>
+                                    <div style={{fontWeight:500}}>{log.action}</div>
+                                    <div style={{color:'var(--text-secondary)', wordBreak:'break-all'}}>{log.details}</div>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>
@@ -565,21 +869,24 @@
             const [history, setHistory] = useState([]);
             useEffect(() => {
                 fetch(`${apiHost}/api/admin/login-history`, { headers: { 'Authorization': `Bearer ${token}` } })
-                    .then(res => res.json()).then(setHistory);
+                    .then(r => r.json()).then(setHistory);
             }, []);
 
             return (
-                <div className="modal-overlay">
-                    <div className="modal-content" style={{maxWidth:'800px', height:'80vh'}}>
-                        <div className="modal-header"><h3>🕒 登录历史</h3><button className="btn btn-sm btn-secondary" onClick={onClose}>关闭</button></div>
-                        <div className="modal-body" style={{padding:0}}>
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3>登录历史</h3>
+                            <button className="nav-btn" onClick={onClose}>✕</button>
+                        </div>
+                        <div className="modal-body" style={{maxHeight:'60vh', overflowY:'auto'}}>
                             <table className="history-table">
                                 <thead>
                                     <tr>
                                         <th>时间</th>
-                                        <th>IP 地址</th>
+                                        <th>用户</th>
+                                        <th>IP地址</th>
                                         <th>归属地</th>
-                                        <th>用户名</th>
                                         <th>状态</th>
                                     </tr>
                                 </thead>
@@ -587,17 +894,20 @@
                                     {history.map(h => (
                                         <tr key={h.id}>
                                             <td>{new Date(h.time).toLocaleString()}</td>
-                                            <td style={{fontFamily:'monospace'}}>{h.ip}</td>
-                                            <td>{h.location}</td>
                                             <td>{h.username}</td>
+                                            <td>{h.ip}</td>
+                                            <td>{h.location}</td>
                                             <td>
-                                                <span style={{color: h.status ? 'var(--success)' : 'var(--danger)'}}>
+                                                <span style={{
+                                                    color: h.status ? 'var(--success)' : 'var(--danger)',
+                                                    background: h.status ? 'rgba(48,209,88,0.1)' : 'rgba(255,69,58,0.1)',
+                                                    padding: '2px 8px', borderRadius:'4px', fontSize:'0.8rem'
+                                                }}>
                                                     {h.status ? '成功' : '失败'}
                                                 </span>
                                             </td>
                                         </tr>
                                     ))}
-                                    {history.length === 0 && <tr><td colSpan="5" style={{textAlign:'center', padding:'2rem'}}>暂无记录</td></tr>}
                                 </tbody>
                             </table>
                         </div>
@@ -606,253 +916,50 @@
             );
         };
 
-        const AdminSettingsModal = ({ token, apiHost, onClose, onLogout, applyTheme }) => {
-            const [config, setConfig] = useState({});
-            const [uploading, setUploading] = useState(false);
-            const fileInputRef = useRef(null);
-            const bgInputRef = useRef(null);
-            const [username, setUsername] = useState('admin');
-            const [password, setPassword] = useState('');
-            
-            // Theme states
-            const [primaryColor, setPrimaryColor] = useState('#007AFF');
-            const [bgImage, setBgImage] = useState('');
-            const [opacity, setOpacity] = useState(0.4);
-
-            useEffect(() => {
-                fetch(`${apiHost}/api/admin/config`, { headers: { 'Authorization': `Bearer ${token}` } })
-                    .then(r => r.json())
-                    .then(data => {
-                        setConfig(data);
-                        if(data.uiTheme) {
-                            setPrimaryColor(data.uiTheme.primaryColor || '#007AFF');
-                            setBgImage(data.uiTheme.backgroundImage || '');
-                            setOpacity(data.uiTheme.overlayOpacity ?? 0.4);
-                        }
-                    });
-            }, []);
-
-            const saveConfig = async () => {
-                const newConfig = {
-                    ...config,
-                    uiTheme: {
-                        primaryColor,
-                        backgroundImage: bgImage,
-                        overlayOpacity: parseFloat(opacity)
-                    }
-                };
-                await fetch(`${apiHost}/api/admin/config`, {
-                    method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
-                    body: JSON.stringify(newConfig)
-                });
-                applyTheme(newConfig.uiTheme);
-                alert("配置已保存");
-            };
-
-            const handleUpload = async (e, type) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const fd = new FormData();
-                fd.append('image', file);
-                setUploading(true);
-                try {
-                    const res = await fetch(`${apiHost}/api/upload`, { method:'POST', headers:{'Authorization':`Bearer ${token}`}, body:fd });
-                    if(res.ok) {
-                        const d = await res.json();
-                        if (type === 'renewal') {
-                            let path = d.path.replace(/\\/g, '/');
-                            if(!path.startsWith('/')) path = '/' + path;
-                            setConfig(p => ({ ...p, renewalMessage: (p.renewalMessage||'') + `\n[CQ:image,file=file://${path}]` }));
-                        } else if (type === 'background') {
-                            setBgImage(d.url);
-                        }
-                    }
-                } finally { setUploading(false); }
-            };
-
-            const backupNow = async () => {
-                if(!confirm("立即执行备份？")) return;
-                await fetch(`${apiHost}/api/backup/now`, { method:'POST', headers:{'Authorization':`Bearer ${token}`} });
-                alert("备份任务已触发");
-            };
-
-            const changePwd = async () => {
-                if(!confirm("修改密码需重新登录")) return;
-                await fetch(`${apiHost}/api/admin/change-password`, {
-                    method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
-                    body: JSON.stringify({ newUsername: username, newPassword: password })
-                });
-                onLogout();
-            };
-
-            return (
-                <div className="modal-overlay">
-                    <div className="modal-content" style={{maxWidth:'650px'}}>
-                        <div className="modal-header"><h3>🛠 系统配置</h3></div>
-                        <div className="modal-body">
-                            
-                            <div className="section-divider">🎨 个性化 (VisionOS)</div>
-                            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem'}}>
-                                <div className="form-group">
-                                    <label className="stat-label">主题主色</label>
-                                    <div style={{display:'flex', gap:'0.5rem', alignItems:'center'}}>
-                                        <input type="color" value={primaryColor} onChange={e=>setPrimaryColor(e.target.value)} style={{width:'40px', height:'40px', padding:0, border:'none', borderRadius:'50%', overflow:'hidden', cursor:'pointer'}} />
-                                        <input className="form-control" value={primaryColor} onChange={e=>setPrimaryColor(e.target.value)} />
-                                    </div>
-                                </div>
-                                <div className="form-group">
-                                    <label className="stat-label">背景遮罩浓度 ({opacity})</label>
-                                    <input type="range" min="0" max="1" step="0.1" value={opacity} onChange={e=>setOpacity(e.target.value)} style={{width:'100%'}} />
-                                </div>
-                            </div>
-                            <div className="form-group" style={{marginTop:'1rem'}}>
-                                <label className="stat-label">背景图片 (URL 或上传)</label>
-                                <div style={{display:'flex', gap:'0.5rem'}}>
-                                    <input className="form-control" value={bgImage} onChange={e=>setBgImage(e.target.value)} placeholder="https://..." />
-                                    <input type="file" ref={bgInputRef} style={{display:'none'}} onChange={(e)=>handleUpload(e, 'background')} />
-                                    <button className="btn btn-secondary" onClick={()=>bgInputRef.current.click()} disabled={uploading}>📤 上传</button>
-                                    <button className="btn btn-secondary" onClick={()=>setBgImage('')}>🚫 重置</button>
-                                </div>
-                            </div>
-
-                            <div className="section-divider">自动退群策略 (高级)</div>
-                            <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1rem'}}>
-                                <label className="stat-label" style={{margin:0, fontSize:'1rem'}}>开启到期自动退群</label>
-                                <input type="checkbox" style={{transform:'scale(1.5)'}} checked={config.autoQuit||false} onChange={e=>setConfig({...config, autoQuit:e.target.checked})} />
-                            </div>
-                            {config.autoQuit && (
-                                <div style={{animation:'fadeIn 0.3s'}}>
-                                    <div className="form-group">
-                                        <label className="stat-label">到期后等待 (小时)</label>
-                                        <input type="number" className="form-control" value={config.quitWaitHours||24} onChange={e=>setConfig({...config,quitWaitHours:parseInt(e.target.value)})} />
-                                    </div>
-                                    <div className="form-group" style={{marginTop:'1rem'}}>
-                                        <label className="stat-label">退群告别语</label>
-                                        <textarea className="form-control" value={config.quitMessage||''} onChange={e=>setConfig({...config,quitMessage:e.target.value})} rows="2"></textarea>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="section-divider">回复与通知</div>
-                            <div className="form-group">
-                                <label className="stat-label">到期通知内容</label>
-                                <textarea className="form-control" value={config.defaultNotifyMessage||''} onChange={e=>setConfig({...config,defaultNotifyMessage:e.target.value})} rows="2"></textarea>
-                            </div>
-                            <div className="form-group" style={{marginTop:'1rem'}}>
-                                <label className="stat-label">预警设置 (提前天数)</label>
-                                <input type="number" className="form-control" value={config.warningDays||3} onChange={e=>setConfig({...config,warningDays:parseInt(e.target.value)})} />
-                            </div>
-                            <div className="form-group" style={{marginTop:'1rem'}}>
-                                <label className="stat-label">预警通知内容</label>
-                                <textarea className="form-control" value={config.warningMessage||''} onChange={e=>setConfig({...config,warningMessage:e.target.value})} rows="2"></textarea>
-                            </div>
-                            <div className="form-group" style={{marginTop:'1rem'}}>
-                                <label className="stat-label">续费回复 (指令: xa续费)</label>
-                                <textarea className="form-control" value={config.renewalMessage||''} onChange={e=>setConfig({...config,renewalMessage:e.target.value})} rows="3"></textarea>
-                                <div style={{marginTop:8}}>
-                                    <input type="file" ref={fileInputRef} style={{display:'none'}} onChange={(e)=>handleUpload(e, 'renewal')} />
-                                    <button className="btn btn-sm btn-secondary" onClick={()=>fileInputRef.current.click()} disabled={uploading}>📷 插入收款码/图片</button>
-                                </div>
-                            </div>
-                            
-                            <div className="section-divider">运维与安全</div>
-                            <div className="form-group">
-                                <label className="stat-label">备份保留天数</label>
-                                <input type="number" className="form-control" value={config.backupRetentionDays||7} onChange={e=>setConfig({...config,backupRetentionDays:parseInt(e.target.value)})} />
-                            </div>
-                            <div style={{marginBottom:'1rem', display:'flex', justifyContent:'space-between', marginTop:'1rem'}}>
-                                <button className="btn btn-sm btn-secondary" onClick={backupNow}>📂 立即备份数据</button>
-                                <button className="btn btn-sm btn-primary" onClick={saveConfig}>💾 保存所有配置</button>
-                            </div>
-
-                            <div className="section-divider">账户管理</div>
-                            <div className="form-group"><input className="form-control" value={username} onChange={e=>setUsername(e.target.value)} placeholder="新用户名"/></div>
-                            <div className="form-group" style={{marginTop:'0.5rem'}}><input className="form-control" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="新密码"/></div>
-                            <button className="btn btn-sm btn-danger" style={{width:'100%', marginTop:'1rem'}} onClick={changePwd}>更新管理员账号 (需重登)</button>
-                        </div>
-                        <div className="modal-actions"><button className="btn btn-secondary" onClick={onClose}>关闭</button></div>
-                    </div>
-                </div>
-            );
-        };
-
         const AddBotModal = ({ token, apiHost, onClose, onSuccess }) => {
             const [id, setId] = useState('');
             const [name, setName] = useState('');
-            const add = async () => {
-                if(!id) return;
-                const res = await fetch(`${apiHost}/api/bot/create`, {
-                    method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
-                    body: JSON.stringify({ id, name })
+
+            const handleAdd = async () => {
+                if (!id) return;
+                await fetch(`${apiHost}/api/bot/create`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ id, name: name || `Bot ${id}` })
                 });
-                if(res.ok) { onSuccess(); onClose(); } else alert("添加失败");
+                onSuccess();
+                onClose();
             };
+
             return (
-                <div className="modal-overlay">
-                    <div className="modal-content" style={{maxWidth:'450px'}}>
-                        <div className="modal-header"><h3>新增实例</h3></div>
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'400px'}}>
+                        <div className="modal-header">
+                            <h3>新增机器人实例</h3>
+                            <button className="nav-btn" onClick={onClose}>✕</button>
+                        </div>
                         <div className="modal-body">
+                            <p style={{color:'var(--text-secondary)', marginBottom:'1rem', fontSize:'0.9rem'}}>
+                                预先创建一个机器人配置，等待 WebSocket 连接。
+                            </p>
                             <div className="form-group">
-                                <label className="stat-label">Bot QQ</label>
-                                <input className="form-control" value={id} onChange={e=>setId(e.target.value)} placeholder="QQ号"/>
+                                <label className="stat-label">Bot QQ号 (ID)</label>
+                                <input type="number" className="form-control" value={id} onChange={e => setId(e.target.value)} placeholder="123456" />
                             </div>
-                            <div className="form-group" style={{marginTop:'1rem'}}>
-                                <label className="stat-label">备注名</label>
-                                <input className="form-control" value={name} onChange={e=>setName(e.target.value)} placeholder="可选备注"/>
+                            <div className="form-group">
+                                <label className="stat-label">备注名称</label>
+                                <input className="form-control" value={name} onChange={e => setName(e.target.value)} placeholder="我的机器人" />
                             </div>
                         </div>
-                        <div className="modal-actions"><button className="btn btn-secondary" onClick={onClose}>取消</button><button className="btn btn-primary" onClick={add}>确认添加</button></div>
+                        <div className="modal-actions">
+                            <button className="btn btn-primary" onClick={handleAdd}>创建实例</button>
+                        </div>
                     </div>
                 </div>
             );
         };
 
-        const SendMsgModal = ({ bot, token, apiHost, onClose }) => {
-            const [gid, setGid] = useState('');
-            const [msg, setMsg] = useState('');
-            const [search, setSearch] = useState('');
-            const contracts = bot.contracts || [];
-            const filteredGroups = contracts.filter(c => String(c.groupId).includes(search));
-
-            const send = async () => {
-                if(!gid||!msg) return;
-                const res = await fetch(`${apiHost}/api/bot/send`, {
-                    method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
-                    body:JSON.stringify({id:bot.id, group_id:gid, message:msg})
-                });
-                if(res.ok) { alert('发送成功'); setMsg(''); } else alert('发送失败');
-            };
-
-            return (
-                <div className="modal-overlay">
-                    <div className="modal-content" style={{maxWidth:'500px'}}>
-                        <div className="modal-header"><h3>发送消息 ({bot.name})</h3></div>
-                        <div className="modal-body">
-                            <div className="form-group"><label className="stat-label">目标群号</label><input className="form-control" value={gid} onChange={e=>setGid(e.target.value)}/></div>
-                            <div className="form-group" style={{marginTop:'1rem'}}><label className="stat-label">消息内容</label><textarea className="form-control" value={msg} onChange={e=>setMsg(e.target.value)} rows="4"></textarea></div>
-                            
-                            <div className="section-divider">群列表选择</div>
-                            <input className="form-control" placeholder="🔍 搜索群号..." value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:'0.5rem'}}/>
-                            <div className="log-list" style={{maxHeight:'150px', overflowY:'auto'}}>
-                                {filteredGroups.map(c => (
-                                    <div key={c.id} className="log-item" style={{gridTemplateColumns:'1fr', cursor:'pointer', padding:'0.5rem'}} onClick={()=>setGid(c.groupId)}>
-                                        <div style={{display:'flex',justifyContent:'space-between'}}>
-                                            <span style={{fontWeight:600}}>群 {c.groupId}</span>
-                                            <span style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>{c.expireTime ? new Date(c.expireTime).toLocaleDateString() : '永久'}</span>
-                                        </div>
-                                    </div>
-                                ))}
-                                {filteredGroups.length === 0 && <div style={{padding:'0.5rem', textAlign:'center', color:'var(--text-muted)'}}>无匹配群</div>}
-                            </div>
-
-                        </div>
-                        <div className="modal-actions"><button className="btn btn-secondary" onClick={onClose}>关闭</button><button className="btn btn-primary" onClick={send}>发送</button></div>
-                    </div>
-                </div>
-            );
-        };
-
-        createRoot(document.getElementById('root')).render(<App />);
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
