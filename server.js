@@ -14,9 +14,9 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// --- 配置 ---
+// --- Configuration ---
 const PORT = 54321;
-const JWT_SECRET = 'napcat-secret-key-change-this'; // 实际生产请修改
+const JWT_SECRET = 'napcat-secret-key-change-this'; // Please change this in production
 const DB_FILE = path.join(__dirname, 'bots.json');
 const ADMIN_FILE = path.join(__dirname, 'admin.json');
 const AUDIT_FILE = path.join(__dirname, 'audit.json');
@@ -24,12 +24,12 @@ const LOGIN_HISTORY_FILE = path.join(__dirname, 'login_history.json');
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const BACKUPS_DIR = path.join(__dirname, 'backups');
 
-// --- 目录初始化 ---
+// --- Directory Initialization ---
 [UPLOADS_DIR, BACKUPS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir);
 });
 
-// --- Multer 上传配置 ---
+// --- Multer Config ---
 const storage = multer.diskStorage({
     destination: function (req, file, cb) { cb(null, UPLOADS_DIR) },
     filename: function (req, file, cb) {
@@ -39,7 +39,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// --- 初始化数据 ---
+// --- Initial Data ---
 let adminConfig = {
     username: 'admin',
     password: 'admin123',
@@ -48,7 +48,7 @@ let adminConfig = {
     warningMessage: '[温馨提醒] 本群机器人服务即将到期，请及时续费以免影响使用。',
     renewalMessage: '请联系管理员进行续费。\n支持微信/支付宝。',
     backupRetentionDays: 7,
-    // 自动退群策略
+    // Auto Quit Strategy
     autoQuit: false, 
     quitWaitHours: 24,
     quitMessage: '[服务结束] 由于服务到期未续费，机器人将自动退出本群。感谢使用，江湖再见。',
@@ -69,7 +69,7 @@ if (fs.existsSync(ADMIN_FILE)) {
         if (!adminConfig.uiTheme) {
             adminConfig.uiTheme = { primaryColor: '#007AFF', backgroundImage: '', overlayOpacity: 0.4 };
         }
-    } catch (e) { console.error("读取管理员配置失败"); }
+    } catch (e) { console.error("Failed to read admin config"); }
 } else {
     fs.writeFileSync(ADMIN_FILE, JSON.stringify(adminConfig, null, 2));
 }
@@ -84,7 +84,39 @@ if (fs.existsSync(LOGIN_HISTORY_FILE)) {
 
 const saveAdminConfig = () => fs.writeFileSync(ADMIN_FILE, JSON.stringify(adminConfig, null, 2));
 
-// --- 日志系统 ---
+// --- Security: Rate Limiting ---
+const loginAttempts = new Map(); // IP -> { count, blockedUntil }
+
+const checkRateLimit = (ip) => {
+    const now = Date.now();
+    const record = loginAttempts.get(ip);
+    if (!record) return true;
+    if (record.blockedUntil && now < record.blockedUntil) return false;
+    return true;
+};
+
+const recordLoginAttempt = (ip, success) => {
+    const now = Date.now();
+    let record = loginAttempts.get(ip) || { count: 0, blockedUntil: 0 };
+    
+    if (success) {
+        loginAttempts.delete(ip); // Reset
+    } else {
+        // If previously blocked and time passed, reset
+        if (record.blockedUntil && now > record.blockedUntil) {
+            record = { count: 0, blockedUntil: 0 };
+        }
+        
+        record.count += 1;
+        if (record.count >= 5) {
+            record.blockedUntil = now + 15 * 60 * 1000; // Block for 15 minutes
+            console.warn(`IP ${ip} blocked due to too many failed login attempts.`);
+        }
+        loginAttempts.set(ip, record);
+    }
+};
+
+// --- Logging System ---
 const writeLog = (type, action, details) => {
     const entry = {
         id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
@@ -98,7 +130,7 @@ const writeLog = (type, action, details) => {
     fs.writeFile(AUDIT_FILE, JSON.stringify(logs, null, 2), () => {});
 };
 
-// --- 登录历史记录 ---
+// --- Login History ---
 const getIpLocation = async (ip) => {
     if (!ip || ip === '::1' || ip === '127.0.0.1' || ip.startsWith('192.168')) {
         return '本地/局域网';
@@ -135,7 +167,7 @@ const recordLogin = async (username, ip, success) => {
     } catch (e) { console.error("IP location update failed", e); }
 };
 
-// --- 备份系统 ---
+// --- Backup System ---
 const performBackup = () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = path.join(BACKUPS_DIR, `backup-${timestamp}`);
@@ -164,17 +196,17 @@ const performBackup = () => {
     }
 };
 
-// --- 中间件 ---
+// --- Middleware ---
 app.use(cors());
 app.use(express.json());
 
-// --- 路由配置 ---
+// --- Routes ---
 app.get('/lincyppq', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/index.css', (req, res) => res.sendFile(path.join(__dirname, 'index.css')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.get('/', (req, res) => res.status(403).send('Access Denied.'));
 
-// --- 数据加载 ---
+// --- DB Loading ---
 let botsDB = {};
 if (fs.existsSync(DB_FILE)) {
     try { botsDB = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
@@ -182,7 +214,6 @@ if (fs.existsSync(DB_FILE)) {
 const saveDB = () => fs.writeFileSync(DB_FILE, JSON.stringify(botsDB, null, 2));
 
 const activeConnections = new Map(); 
-// 用于存储 HTTP 等待 WS 响应的 Promise
 const pendingRequests = new Map();
 
 // --- WebSocket ---
@@ -190,7 +221,7 @@ wss.on('connection', (ws, req) => {
     const selfId = req.headers['x-self-id'] || req.headers['x-client-role'];
     
     if (selfId) {
-        console.log(`NapCat 连接: ${selfId}`);
+        console.log(`NapCat Connected: ${selfId}`);
         activeConnections.set(String(selfId), ws);
         writeLog('BOT', 'CONNECTED', `Bot ${selfId} online`);
         
@@ -211,15 +242,15 @@ wss.on('connection', (ws, req) => {
             try {
                 const msg = JSON.parse(message);
 
-                // 处理 HTTP -> WS 的同步请求响应 (Echo 机制)
+                // Echo mechanism for sync requests
                 if (msg.echo && pendingRequests.has(msg.echo)) {
                     const { resolve } = pendingRequests.get(msg.echo);
                     resolve(msg);
                     pendingRequests.delete(msg.echo);
-                    return; // 这是一个 API 调用响应，不处理为聊天消息
+                    return; 
                 }
 
-                // 处理群消息指令
+                // Auto Reply Logic
                 if (msg.post_type === 'message' && (msg.message_type === 'group' || (msg.message && msg.message_type === 'group'))) {
                     const rawText = msg.raw_message || msg.message || "";
                     const groupId = msg.group_id;
@@ -272,14 +303,22 @@ const authenticateToken = (req, res, next) => {
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    const cleanIp = ip.replace(/^::ffff:/, '');
+
+    // Rate Limiting Check
+    if (!checkRateLimit(cleanIp)) {
+        return res.status(429).json({ error: '尝试次数过多，IP 已暂时锁定 15 分钟' });
+    }
     
     if (username === adminConfig.username && password === adminConfig.password) {
+        recordLoginAttempt(cleanIp, true);
         const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '24h' });
         writeLog('USER', 'LOGIN', `User ${username} logged in`);
         recordLogin(username, ip, true);
         res.json({ token });
     } else {
-        writeLog('USER', 'LOGIN_FAILED', `Failed attempt for ${username}`);
+        recordLoginAttempt(cleanIp, false);
+        writeLog('USER', 'LOGIN_FAILED', `Failed attempt for ${username} from ${cleanIp}`);
         recordLogin(username || 'unknown', ip, false);
         res.status(401).json({ error: 'Auth failed' });
     }
@@ -319,6 +358,30 @@ app.post('/api/admin/config', authenticateToken, (req, res) => {
     res.json({ success: true });
 });
 
+// Test Message Endpoint (Template Testing)
+app.post('/api/admin/test-msg', authenticateToken, (req, res) => {
+    const { targetGroup, msgType } = req.body; // msgType: 'renewal' | 'expire' | 'warning' | 'quit'
+    
+    let message = '';
+    if (msgType === 'renewal') message = adminConfig.renewalMessage;
+    else if (msgType === 'expire') message = adminConfig.defaultNotifyMessage;
+    else if (msgType === 'warning') message = adminConfig.warningMessage;
+    else if (msgType === 'quit') message = adminConfig.quitMessage;
+    else return res.status(400).json({ error: 'Unknown message type' });
+
+    // Find an online bot
+    const onlineBotId = Object.keys(botsDB).find(id => activeConnections.has(id));
+    if (!onlineBotId) return res.status(503).json({ error: '没有在线的机器人实例可用于发送测试消息' });
+
+    const ws = activeConnections.get(onlineBotId);
+    ws.send(JSON.stringify({
+        action: 'send_group_msg',
+        params: { group_id: parseInt(targetGroup), message }
+    }));
+
+    res.json({ success: true, botUsed: onlineBotId });
+});
+
 app.get('/api/logs', authenticateToken, (req, res) => {
     res.json(logs);
 });
@@ -355,7 +418,6 @@ app.post('/api/bot/update-info', authenticateToken, (req, res) => {
     } else res.status(404).json({ error: 'Not Found' });
 });
 
-// 获取群信息的接口 (通过 Bot 转发)
 app.post('/api/bot/group-info', authenticateToken, async (req, res) => {
     const { botId, groupId } = req.body;
     const ws = activeConnections.get(String(botId));
@@ -366,12 +428,11 @@ app.post('/api/bot/group-info', authenticateToken, async (req, res) => {
 
     const echo = Date.now().toString(36) + Math.random().toString(36).substr(2);
     
-    // 创建一个 Promise 等待 WebSocket 返回
     const responsePromise = new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
             pendingRequests.delete(echo);
             reject(new Error('Timeout waiting for bot response'));
-        }, 5000); // 5秒超时
+        }, 5000); 
 
         pendingRequests.set(echo, {
             resolve: (data) => {
@@ -382,7 +443,6 @@ app.post('/api/bot/group-info', authenticateToken, async (req, res) => {
         });
     });
 
-    // 发送请求给 Bot
     ws.send(JSON.stringify({
         action: 'get_group_info',
         params: { group_id: parseInt(groupId), no_cache: true },
@@ -405,7 +465,6 @@ app.post('/api/bot/group-info', authenticateToken, async (req, res) => {
     }
 });
 
-// 获取机器人所在的所有群列表
 app.post('/api/bot/group-list', authenticateToken, async (req, res) => {
     const { botId } = req.body;
     const ws = activeConnections.get(String(botId));
@@ -439,7 +498,7 @@ app.post('/api/bot/group-list', authenticateToken, async (req, res) => {
     try {
         const data = await responsePromise;
         if (data.status === 'ok' && Array.isArray(data.data)) {
-            res.json(data.data); // 返回群数组
+            res.json(data.data); 
         } else {
             res.status(400).json({ error: 'Failed to get group list' });
         }
@@ -455,15 +514,14 @@ app.post('/api/bot/contract/save', authenticateToken, (req, res) => {
     
     let contract = botsDB[botId].contracts.find(c => c.id === contractId);
     if (contract) {
-        // 如果续期了（时间比之前晚），则重置通知状态和退群状态
         if (expireTime > (contract.expireTime || 0)) {
             contract.notified = false; 
             contract.preNotified = false;
-            contract.leftGroup = false; // 重置退群标记
+            contract.leftGroup = false;
         }
         contract.groupId = groupId;
         contract.expireTime = expireTime;
-        if (groupName) contract.groupName = groupName; // 更新群名
+        if (groupName) contract.groupName = groupName;
         writeLog('USER', 'UPDATE_CONTRACT', `Updated contract for Group ${groupId} (${groupName||''})`);
     } else {
         contract = {
@@ -492,16 +550,13 @@ app.post('/api/bot/contract/delete', authenticateToken, (req, res) => {
     } else res.status(404).json({ error: 'Not Found' });
 });
 
-// 新增：手动退群接口
 app.post('/api/bot/quit-group', authenticateToken, (req, res) => {
     const { botId, groupId } = req.body;
     const ws = activeConnections.get(String(botId));
     
     if (ws && ws.readyState === WebSocket.OPEN) {
-        // 1. 发送退群指令
         ws.send(JSON.stringify({ action: 'set_group_leave', params: { group_id: parseInt(groupId) } }));
         
-        // 2. 更新数据库状态
         if (botsDB[botId]) {
             const contract = botsDB[botId].contracts.find(c => String(c.groupId) === String(groupId));
             if (contract) {
@@ -546,7 +601,7 @@ app.post('/api/upload', authenticateToken, upload.single('image'), (req, res) =>
     });
 });
 
-// --- 定时任务 ---
+// --- Cron Jobs ---
 cron.schedule('* * * * *', () => {
     const now = Date.now();
     let changed = false;
@@ -562,7 +617,7 @@ cron.schedule('* * * * *', () => {
         bot.contracts.forEach(c => {
             if (!c.expireTime) return;
             
-            // 1. 预警逻辑
+            // Pre-warning
             if (!c.preNotified && !c.notified && (c.expireTime - now < warnTime) && (c.expireTime > now)) {
                 if (isOnline) {
                     ws.send(JSON.stringify({ action: 'send_group_msg', params: { group_id: parseInt(c.groupId), message: warnMsg } }));
@@ -572,7 +627,7 @@ cron.schedule('* * * * *', () => {
                 }
             }
 
-            // 2. 到期通知逻辑
+            // Expiry
             if (!c.notified && now > c.expireTime) {
                 if (isOnline) {
                     ws.send(JSON.stringify({ action: 'send_group_msg', params: { group_id: parseInt(c.groupId), message: notifyMsg } }));
@@ -582,15 +637,13 @@ cron.schedule('* * * * *', () => {
                 }
             }
 
-            // 3. 自动退群逻辑
+            // Auto Quit
             if (adminConfig.autoQuit && !c.leftGroup && now > (c.expireTime + quitWaitTime)) {
                 if (isOnline) {
-                    // 先发告别
                     ws.send(JSON.stringify({ action: 'send_group_msg', params: { group_id: parseInt(c.groupId), message: adminConfig.quitMessage } }));
                     
-                    // 延迟退群，防止消息没发出去
                     setTimeout(() => {
-                        if (activeConnections.get(String(bot.id))) { // Double check connection
+                        if (activeConnections.get(String(bot.id))) { 
                              ws.send(JSON.stringify({ action: 'set_group_leave', params: { group_id: parseInt(c.groupId) } }));
                         }
                     }, 2000);
