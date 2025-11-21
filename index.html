@@ -117,6 +117,7 @@
             const [showAddBot, setShowAddBot] = useState(false);
             const [showLoginHistory, setShowLoginHistory] = useState(false);
             const [showRecycleBin, setShowRecycleBin] = useState(false);
+            const [showSearch, setShowSearch] = useState(false);
             const [wsUrl, setWsUrl] = useState('');
 
             useEffect(() => {
@@ -144,6 +145,13 @@
                 return () => clearInterval(interval);
             }, [token]);
 
+            const handleGlobalSearchSelect = (botId, contract) => {
+                const bot = bots.find(b => b.id === botId);
+                if (bot) {
+                    setEditingBot(bot);
+                }
+            };
+
             return (
                 <div className="dashboard">
                     <div className="header-ornament">
@@ -153,6 +161,7 @@
                         </div>
                         
                         <button onClick={() => setShowAddBot(true)} className="nav-btn" title="新增">＋</button>
+                        <button onClick={() => setShowSearch(true)} className="nav-btn" title="全局搜索">🔍</button>
                         <button onClick={() => setShowRecycleBin(true)} className="nav-btn" title="回收站">♻️</button>
                         <button onClick={() => setShowLoginHistory(true)} className="nav-btn" title="历史">🕒</button>
                         <button onClick={() => setShowLogs(true)} className="nav-btn" title="日志">📜</button>
@@ -184,6 +193,7 @@
                     {showLoginHistory && <LoginHistoryModal token={token} apiHost={apiHost} onClose={() => setShowLoginHistory(false)} />}
                     {showAddBot && <AddBotModal token={token} apiHost={apiHost} onClose={() => setShowAddBot(false)} onSuccess={fetchBots} />}
                     {showRecycleBin && <RecycleBinModal token={token} apiHost={apiHost} onClose={() => setShowRecycleBin(false)} onSuccess={fetchBots} />}
+                    {showSearch && <GlobalSearchModal bots={bots} onClose={() => setShowSearch(false)} onSelect={handleGlobalSearchSelect} />}
                 </div>
             );
         };
@@ -301,6 +311,141 @@
             );
         };
 
+        const GhostScanModal = ({ bot, token, apiHost, onClose }) => {
+            const [ghosts, setGhosts] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [selected, setSelected] = useState(new Set());
+            const [scanning, setScanning] = useState(false);
+
+            const scan = async () => {
+                setLoading(true);
+                try {
+                    const res = await fetch(`${apiHost}/api/bot/ghost-scan`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ botId: bot.id })
+                    });
+                    const data = await res.json();
+                    if (res.ok) setGhosts(data);
+                    else alert(data.error);
+                } catch (e) { alert('扫描失败'); } 
+                finally { setLoading(false); }
+            };
+
+            useEffect(() => { scan(); }, []);
+
+            const toggleSelect = (gid) => {
+                const next = new Set(selected);
+                if (next.has(gid)) next.delete(gid);
+                else next.add(gid);
+                setSelected(next);
+            };
+
+            const handleClean = async () => {
+                if (selected.size === 0) return;
+                if (!confirm(`确定要退出选中的 ${selected.size} 个群聊吗？`)) return;
+                try {
+                    const res = await fetch(`${apiHost}/api/bot/ghost-clean`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ botId: bot.id, groupIds: Array.from(selected) })
+                    });
+                    const data = await res.json();
+                    alert(`已成功清理 ${data.count} 个群`);
+                    scan(); // refresh
+                    setSelected(new Set());
+                } catch (e) { alert('清理失败'); }
+            };
+
+            return (
+                <div className="modal-overlay" style={{zIndex: 1100}} onClick={onClose}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'500px'}}>
+                        <div className="modal-header"><h3>👻 幽灵群扫描</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                        <div className="modal-body">
+                            <p style={{color:'var(--text-secondary)', fontSize:'0.9rem', marginBottom:'1rem'}}>
+                                幽灵群指机器人已加入，但未在面板授权的群。
+                            </p>
+                            {loading ? (
+                                <div style={{textAlign:'center', padding:'2rem'}}>扫描中...</div>
+                            ) : ghosts.length === 0 ? (
+                                <div style={{textAlign:'center', padding:'2rem', color:'var(--success)'}}>✅ 未发现幽灵群</div>
+                            ) : (
+                                <div>
+                                    <div style={{maxHeight:'300px', overflowY:'auto', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'var(--radius-sm)', padding:'0.5rem'}}>
+                                        {ghosts.map(g => (
+                                            <div key={g.group_id} style={{display:'flex', alignItems:'center', padding:'0.5rem', borderBottom:'1px solid rgba(255,255,255,0.05)'}}>
+                                                <input type="checkbox" checked={selected.has(g.group_id)} onChange={() => toggleSelect(g.group_id)} style={{marginRight:'10px'}} />
+                                                <div>
+                                                    <div>{g.group_name || g.group_id}</div>
+                                                    <div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>{g.group_id} ({g.member_count}人)</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div style={{marginTop:'1rem', display:'flex', justifyContent:'space-between'}}>
+                                        <button className="btn btn-sm btn-secondary" onClick={() => {
+                                            if (selected.size === ghosts.length) setSelected(new Set());
+                                            else setSelected(new Set(ghosts.map(g => g.group_id)));
+                                        }}>{selected.size === ghosts.length ? '取消全选' : '全选'}</button>
+                                        <button className="btn btn-sm btn-danger" disabled={selected.size===0} onClick={handleClean}>退出选中 ({selected.size})</button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const GlobalSearchModal = ({ bots, onClose, onSelect }) => {
+            const [term, setTerm] = useState('');
+            
+            const results = useMemo(() => {
+                if (!term) return [];
+                const list = [];
+                bots.forEach(bot => {
+                    if (bot.contracts) {
+                        bot.contracts.forEach(c => {
+                            if (String(c.groupId).includes(term) || (c.groupName && c.groupName.includes(term))) {
+                                list.push({ ...c, botName: bot.name, botId: bot.id });
+                            }
+                        });
+                    }
+                });
+                return list;
+            }, [term, bots]);
+
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'500px'}}>
+                        <div className="modal-header"><h3>🔍 全局搜索</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                        <div className="modal-body">
+                            <div className="form-group">
+                                <input className="form-control" value={term} onChange={e => setTerm(e.target.value)} placeholder="输入群号或群名称..." autoFocus />
+                            </div>
+                            <div style={{marginTop:'1rem', maxHeight:'400px', overflowY:'auto'}}>
+                                {term && results.length === 0 && <div style={{textAlign:'center', color:'var(--text-secondary)'}}>未找到结果</div>}
+                                {results.map(item => (
+                                    <div key={item.id} className="contract-item" style={{cursor:'pointer'}} onClick={() => { onSelect(item.botId, item); onClose(); }}>
+                                        <div style={{display:'flex', alignItems:'center', gap:'0.8rem'}}>
+                                            <img className="group-avatar" src={`https://p.qlogo.cn/gh/${item.groupId}/${item.groupId}/100`} />
+                                            <div>
+                                                <div style={{fontWeight:600}}>{item.groupName || item.groupId}</div>
+                                                <div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>
+                                                    {item.botName} · {item.groupId}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div style={{fontSize:'0.8rem', color: item.expireTime < Date.now() ? 'var(--danger)' : 'var(--success)'}}>
+                                            {item.expireTime < Date.now() ? '已过期' : '生效中'}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         const EditBotModal = ({ bot, token, apiHost, onClose, onSuccess }) => {
             const [name, setName] = useState(bot.name);
             const [avatar, setAvatar] = useState(bot.avatar || '');
@@ -308,6 +453,7 @@
             const [editingContract, setEditingContract] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
             const [realTimeGroups, setRealTimeGroups] = useState(new Set());
+            const [showGhostScan, setShowGhostScan] = useState(false);
             const fileInputRef = useRef(null);
 
             useEffect(() => {
@@ -418,7 +564,8 @@
                             <div>
                                 <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem', flexWrap:'wrap', gap:'0.5rem'}}>
                                     <h4 style={{margin:0}}>租户 ({contracts.length})</h4>
-                                    <div style={{display:'flex', gap:'0.5rem'}}>
+                                    <div style={{display:'flex', gap:'0.5rem', alignItems:'center'}}>
+                                        {bot.isOnline && <button className="btn btn-sm btn-secondary" onClick={() => setShowGhostScan(true)}>👻 扫描幽灵群</button>}
                                         <input type="text" className="form-control" style={{padding:'0.4rem', width:'120px', fontSize:'0.9rem'}} placeholder="🔍 搜索" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
                                         <button className="btn btn-sm btn-primary" onClick={() => setEditingContract({})}>+ 授权</button>
                                     </div>
@@ -462,6 +609,7 @@
                             </div>
                         </div>
                     </div>
+                    {showGhostScan && <GhostScanModal bot={bot} token={token} apiHost={apiHost} onClose={() => setShowGhostScan(false)} />}
                 </div>
             );
         };
@@ -590,10 +738,17 @@
             const [tab, setTab] = useState('basic'); 
             const [passData, setPassData] = useState({ newUsername: '', newPassword: '' });
             const [testTargetId, setTestTargetId] = useState('');
+            const [backups, setBackups] = useState([]);
             
             useEffect(() => {
                 fetch(`${apiHost}/api/admin/config`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setConfig);
             }, []);
+
+            useEffect(() => {
+                if (tab === 'backup') {
+                    fetch(`${apiHost}/api/backups`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setBackups);
+                }
+            }, [tab]);
 
             const handleSaveConfig = async () => {
                 await fetch(`${apiHost}/api/admin/config`, {
@@ -626,6 +781,46 @@
                 setConfig({...config, uiTheme: {...config.uiTheme, backgroundImage: d.url}});
             };
 
+            const triggerBackup = async () => {
+                await fetch(`${apiHost}/api/backup/now`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+                alert('备份已创建');
+                fetch(`${apiHost}/api/backups`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setBackups);
+            };
+
+            const downloadBackup = (filename) => {
+                fetch(`${apiHost}/api/backup/${filename}`, { headers: { 'Authorization': `Bearer ${token}` } })
+                    .then(res => res.blob())
+                    .then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = filename;
+                        a.click();
+                    });
+            };
+
+            const restoreBackup = async (e) => {
+                const file = e.target.files[0];
+                if(!file) return;
+                if(!confirm('⚠️ 警告：此操作将覆盖当前的机器人数据或系统配置！\n确定要继续吗？')) return;
+
+                const fd = new FormData();
+                fd.append('file', file);
+
+                try {
+                    const res = await fetch(`${apiHost}/api/backup/restore`, {
+                        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: fd
+                    });
+                    const data = await res.json();
+                    if(res.ok) {
+                        alert(`恢复成功！\n类型: ${data.type}`);
+                        window.location.reload();
+                    } else {
+                        alert(`恢复失败: ${data.error}`);
+                    }
+                } catch(e) { alert('恢复出错'); }
+            };
+
             if (!config) return null;
 
             return (
@@ -633,9 +828,9 @@
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'500px'}}>
                         <div className="modal-header"><h3>系统设置</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
                         <div style={{display:'flex', borderBottom:'1px solid rgba(255,255,255,0.1)', padding:'0 1rem', overflowX:'auto'}}>
-                            {['basic', 'notification', 'quit', 'security'].map(t => (
+                            {['basic', 'notification', 'quit', 'backup', 'security'].map(t => (
                                 <div key={t} style={{padding:'1rem', cursor:'pointer', color: tab===t?'var(--primary)':'var(--text-secondary)', borderBottom: tab===t?'2px solid var(--primary)':'none', whiteSpace:'nowrap'}} onClick={() => setTab(t)}>
-                                    {{basic:'基础', notification:'通知', quit:'退群', security:'安全'}[t]}
+                                    {{basic:'基础', notification:'通知与交互', quit:'退群', backup:'备份与恢复', security:'安全'}[t]}
                                 </div>
                             ))}
                         </div>
@@ -657,6 +852,24 @@
                             )}
                             {tab === 'notification' && (
                                 <>
+                                    <div className="section-divider">指令配置</div>
+                                    <div style={{display:'flex', gap:'1rem'}}>
+                                        <div style={{flex:1}}>
+                                            <label className="stat-label">前缀 (Prefix)</label>
+                                            <input className="form-control" value={config.cmdPrefix} onChange={e=>setConfig({...config, cmdPrefix:e.target.value})} placeholder="xa" />
+                                        </div>
+                                    </div>
+                                    <div style={{display:'flex', gap:'1rem', marginTop:'0.5rem'}}>
+                                        <div style={{flex:1}}>
+                                            <label className="stat-label">查询关键词</label>
+                                            <input className="form-control" value={config.cmdQuery} onChange={e=>setConfig({...config, cmdQuery:e.target.value})} placeholder="查询到期" />
+                                        </div>
+                                        <div style={{flex:1}}>
+                                            <label className="stat-label">续费关键词</label>
+                                            <input className="form-control" value={config.cmdRenew} onChange={e=>setConfig({...config, cmdRenew:e.target.value})} placeholder="续费" />
+                                        </div>
+                                    </div>
+
                                     <div className="section-divider">消息测试</div>
                                     <div style={{background:'rgba(255,255,255,0.03)', padding:'1rem', borderRadius:'var(--radius-sm)'}}>
                                         <input className="form-control" type="number" value={testTargetId} onChange={e=>setTestTargetId(e.target.value)} placeholder="测试群号" />
@@ -681,6 +894,29 @@
                                     </div>
                                     <div className="form-group" style={{marginTop:'1rem'}}><label className="stat-label">延时(小时)</label><input type="number" className="form-control" value={config.quitWaitHours} onChange={e => setConfig({...config, quitWaitHours: parseInt(e.target.value)})} /></div>
                                     <div className="form-group"><label className="stat-label">告别语</label><textarea className="form-control" value={config.quitMessage} onChange={e => setConfig({...config, quitMessage: e.target.value})} /></div>
+                                </>
+                            )}
+                            {tab === 'backup' && (
+                                <>
+                                    <div className="section-divider">备份策略</div>
+                                    <div className="form-group"><label className="stat-label">保留天数</label><input type="number" className="form-control" value={config.backupRetentionDays} onChange={e => setConfig({...config, backupRetentionDays: parseInt(e.target.value)})} /></div>
+                                    <div style={{display:'flex', gap:'0.5rem', marginTop:'0.5rem'}}>
+                                        <button className="btn btn-primary" onClick={triggerBackup}>立即备份</button>
+                                        <label className="btn btn-secondary" style={{marginBottom:0}}>📤 导入并恢复<input type="file" style={{display:'none'}} onChange={restoreBackup} accept=".json" /></label>
+                                    </div>
+                                    <div className="section-divider">备份列表</div>
+                                    <div style={{maxHeight:'200px', overflowY:'auto'}}>
+                                        {backups.length === 0 && <div style={{color:'var(--text-secondary)'}}>暂无备份</div>}
+                                        {backups.map(b => (
+                                            <div key={b.name} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.5rem', borderBottom:'1px solid rgba(255,255,255,0.05)'}}>
+                                                <div style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:'180px'}}>
+                                                    <div>{b.name}</div>
+                                                    <div style={{fontSize:'0.7rem', color:'var(--text-secondary)'}}>{new Date(b.created).toLocaleString()} · {b.size}</div>
+                                                </div>
+                                                <button className="btn btn-sm btn-secondary" onClick={() => downloadBackup(b.name)}>⬇️</button>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </>
                             )}
                             {tab === 'security' && (
