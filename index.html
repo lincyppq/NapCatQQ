@@ -128,6 +128,12 @@
                     if (res.status === 401 || res.status === 403) { onLogout(); return; }
                     const data = await res.json();
                     setBots(data);
+                    
+                    // 更新当前正在编辑的 Bot 数据，确保弹窗内列表实时刷新
+                    setEditingBot(prev => {
+                        if (!prev) return null;
+                        return data.find(b => b.id === prev.id) || prev;
+                    });
                 } catch (err) { console.error(err); } finally { setLoading(false); }
             };
 
@@ -301,6 +307,13 @@
             const [realTimeGroups, setRealTimeGroups] = useState(new Set());
             const fileInputRef = useRef(null);
 
+            // 监听 bot 属性变化，实时更新本地 contracts 状态
+            useEffect(() => {
+                setContracts(bot.contracts || []);
+                setName(bot.name);
+                setAvatar(bot.avatar || '');
+            }, [bot]);
+
             useEffect(() => {
                 if (bot.isOnline) {
                     fetch(`${apiHost}/api/bot/group-list`, {
@@ -310,7 +323,7 @@
                         if (Array.isArray(data)) setRealTimeGroups(new Set(data.map(g => String(g.group_id))));
                     }).catch(err => console.error(err));
                 }
-            }, [bot]);
+            }, [bot.id, bot.isOnline]); // 仅在 ID 或在线状态变更时重新拉取群列表
 
             const handleSaveInfo = async () => {
                 await fetch(`${apiHost}/api/bot/update-info`, {
@@ -419,7 +432,7 @@
                                                         </div>
                                                     </div>
                                                     <div style={{display:'flex', gap:'0.5rem'}}>
-                                                        {!c.leftGroup && bot.isOnline && (
+                                                        {!c.leftGroup && bot.isOnline && isExpired && (
                                                             <button className="btn btn-sm btn-warning" onClick={() => handleQuitGroup(c.groupId)}>退群</button>
                                                         )}
                                                         <button className="btn btn-sm btn-secondary" onClick={() => setEditingContract(c)}>编辑</button>
@@ -565,6 +578,7 @@
                                             <button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('warning')}>预警</button>
                                             <button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('expire')}>到期</button>
                                             <button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('renewal')}>续费</button>
+                                            <button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('quit')}>退群</button>
                                         </div>
                                     </div>
                                     <div className="section-divider">通知内容</div>
@@ -580,6 +594,7 @@
                                         <span>{config.autoQuit ? '开启' : '关闭'}</span>
                                     </div>
                                     <div className="form-group" style={{marginTop:'1rem'}}><label className="stat-label">延时(小时)</label><input type="number" className="form-control" value={config.quitWaitHours} onChange={e => setConfig({...config, quitWaitHours: parseInt(e.target.value)})} /></div>
+                                    <div className="form-group"><label className="stat-label">告别语</label><textarea className="form-control" value={config.quitMessage} onChange={e => setConfig({...config, quitMessage: e.target.value})} /></div>
                                 </>
                             )}
                             {tab === 'security' && (
