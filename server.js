@@ -384,6 +384,31 @@ app.post('/api/bot/contract/delete', authenticateToken, (req, res) => {
     } else res.status(404).json({ error: 'Not Found' });
 });
 
+// 新增：手动退群接口
+app.post('/api/bot/quit-group', authenticateToken, (req, res) => {
+    const { botId, groupId } = req.body;
+    const ws = activeConnections.get(String(botId));
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        // 1. 发送退群指令
+        ws.send(JSON.stringify({ action: 'set_group_leave', params: { group_id: parseInt(groupId) } }));
+        
+        // 2. 更新数据库状态
+        if (botsDB[botId]) {
+            const contract = botsDB[botId].contracts.find(c => String(c.groupId) === String(groupId));
+            if (contract) {
+                contract.leftGroup = true;
+                saveDB();
+            }
+        }
+        
+        writeLog('USER', 'MANUAL_QUIT', `Manually quit group ${groupId}`);
+        res.json({ success: true });
+    } else {
+        res.status(500).json({ error: 'Bot Offline' });
+    }
+});
+
 app.post('/api/bot/delete', authenticateToken, (req, res) => {
     const { id } = req.body;
     delete botsDB[id];
