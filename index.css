@@ -477,7 +477,7 @@ input[type="checkbox"] {
 }
 
 .contract-item {
-    padding: 1rem;
+    padding: 0.8rem 1rem;
     border: 1px solid rgba(255,255,255,0.05);
     background: rgba(255,255,255,0.03);
     display: flex;
@@ -487,6 +487,32 @@ input[type="checkbox"] {
 
 .contract-item:hover, .log-item:hover, .history-table tr:hover:not(thead tr) {
     background: rgba(255, 255, 255, 0.1); /* Gaze highlight */
+}
+
+.tag-left {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    border: 1px solid var(--text-muted);
+    padding: 0 4px;
+    border-radius: 4px;
+}
+
+.tag-missing {
+    font-size: 0.7rem;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    padding: 0 4px;
+    border-radius: 4px;
+}
+
+.group-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-right: 12px;
+    object-fit: cover;
+    background: #000;
 }
 
 .section-divider {
