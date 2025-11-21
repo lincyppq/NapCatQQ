@@ -48,10 +48,14 @@ let adminConfig = {
     warningMessage: '[温馨提醒] 本群机器人服务即将到期，请及时续费以免影响使用。',
     renewalMessage: '请联系管理员进行续费。\n支持微信/支付宝。',
     backupRetentionDays: 7,
+    // 自动退群策略
+    autoQuit: false, 
+    quitWaitHours: 24,
+    quitMessage: '[服务结束] 由于服务到期未续费，机器人将自动退出本群。感谢使用，江湖再见。',
     uiTheme: {
         primaryColor: '#007AFF', // Apple System Blue
         backgroundImage: '',
-        overlayOpacity: 0.4 // Lighter overlay for glass effect
+        overlayOpacity: 0.4 
     }
 };
 
@@ -62,7 +66,6 @@ if (fs.existsSync(ADMIN_FILE)) {
     try {
         const savedConfig = JSON.parse(fs.readFileSync(ADMIN_FILE, 'utf8'));
         adminConfig = { ...adminConfig, ...savedConfig };
-        // 确保 uiTheme 存在
         if (!adminConfig.uiTheme) {
             adminConfig.uiTheme = { primaryColor: '#007AFF', backgroundImage: '', overlayOpacity: 0.4 };
         }
@@ -101,7 +104,6 @@ const getIpLocation = async (ip) => {
         return '本地/局域网';
     }
     try {
-        // 使用 ip-api.com 中文接口
         const res = await axios.get(`http://ip-api.com/json/${ip}?lang=zh-CN`, { timeout: 3000 });
         if (res.data.status === 'success') {
             return `${res.data.country} ${res.data.regionName} ${res.data.city}`;
@@ -113,10 +115,7 @@ const getIpLocation = async (ip) => {
 };
 
 const recordLogin = async (username, ip, success) => {
-    // 清洗 IP (处理 ::ffff: 前缀)
     const cleanIp = ip.replace(/^::ffff:/, '');
-    
-    // 先保存基础信息，不阻塞
     const entry = {
         id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
         time: Date.now(),
@@ -125,19 +124,15 @@ const recordLogin = async (username, ip, success) => {
         location: '查询中...',
         status: success
     };
-    
     loginHistory.unshift(entry);
     if (loginHistory.length > 200) loginHistory = loginHistory.slice(0, 200);
     fs.writeFile(LOGIN_HISTORY_FILE, JSON.stringify(loginHistory, null, 2), () => {});
 
-    // 异步查询归属地并更新
     try {
         const location = await getIpLocation(cleanIp);
         entry.location = location;
         fs.writeFile(LOGIN_HISTORY_FILE, JSON.stringify(loginHistory, null, 2), () => {});
-    } catch (e) {
-        console.error("IP location update failed", e);
-    }
+    } catch (e) { console.error("IP location update failed", e); }
 };
 
 // --- 备份系统 ---
@@ -151,7 +146,6 @@ const performBackup = () => {
         
         writeLog('SYSTEM', 'BACKUP_CREATED', `Backup created: ${timestamp}`);
         
-        // 清理旧备份
         const retentionMs = (adminConfig.backupRetentionDays || 7) * 24 * 60 * 60 * 1000;
         const files = fs.readdirSync(BACKUPS_DIR);
         const now = Date.now();
@@ -175,15 +169,9 @@ app.use(cors());
 app.use(express.json());
 
 // --- 路由配置 ---
-
-// 1. 面板主页
 app.get('/lincyppq', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-
-// 2. 静态资源服务 (仅暴露 CSS 和 Uploads)
 app.get('/index.css', (req, res) => res.sendFile(path.join(__dirname, 'index.css')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// 3. 根目录禁止访问 (安全保护)
 app.get('/', (req, res) => res.status(403).send('Access Denied.'));
 
 // --- 数据加载 ---
@@ -276,12 +264,10 @@ app.post('/api/login', (req, res) => {
     if (username === adminConfig.username && password === adminConfig.password) {
         const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '24h' });
         writeLog('USER', 'LOGIN', `User ${username} logged in`);
-        // 异步记录
         recordLogin(username, ip, true);
         res.json({ token });
     } else {
         writeLog('USER', 'LOGIN_FAILED', `Failed attempt for ${username}`);
-        // 异步记录
         recordLogin(username || 'unknown', ip, false);
         res.status(401).json({ error: 'Auth failed' });
     }
@@ -307,6 +293,9 @@ app.get('/api/admin/config', authenticateToken, (req, res) => {
         warningMessage: adminConfig.warningMessage,
         renewalMessage: adminConfig.renewalMessage,
         backupRetentionDays: adminConfig.backupRetentionDays,
+        autoQuit: adminConfig.autoQuit,
+        quitWaitHours: adminConfig.quitWaitHours,
+        quitMessage: adminConfig.quitMessage,
         uiTheme: adminConfig.uiTheme || { primaryColor: '#007AFF', backgroundImage: '', overlayOpacity: 0.4 }
     });
 });
@@ -360,9 +349,11 @@ app.post('/api/bot/contract/save', authenticateToken, (req, res) => {
     
     let contract = botsDB[botId].contracts.find(c => c.id === contractId);
     if (contract) {
+        // 如果续期了（时间比之前晚），则重置通知状态和退群状态
         if (expireTime > (contract.expireTime || 0)) {
             contract.notified = false; 
             contract.preNotified = false;
+            contract.leftGroup = false; // 重置退群标记
         }
         contract.groupId = groupId;
         contract.expireTime = expireTime;
@@ -373,7 +364,8 @@ app.post('/api/bot/contract/save', authenticateToken, (req, res) => {
             groupId,
             expireTime,
             notified: false,
-            preNotified: false
+            preNotified: false,
+            leftGroup: false
         };
         botsDB[botId].contracts.push(contract);
         writeLog('USER', 'ADD_CONTRACT', `Added contract for Group ${groupId}`);
@@ -415,7 +407,6 @@ app.post('/api/bot/send', authenticateToken, (req, res) => {
 
 app.post('/api/upload', authenticateToken, upload.single('image'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file' });
-    // 返回绝对路径给 Bot 用，返回 URL 给前端显示用
     res.json({ 
         path: path.resolve(req.file.path),
         url: `/uploads/${req.file.filename}` 
@@ -429,6 +420,7 @@ cron.schedule('* * * * *', () => {
     const notifyMsg = adminConfig.defaultNotifyMessage;
     const warnMsg = adminConfig.warningMessage;
     const warnTime = (adminConfig.warningDays || 3) * 24 * 60 * 60 * 1000;
+    const quitWaitTime = (adminConfig.quitWaitHours || 24) * 60 * 60 * 1000;
 
     Object.values(botsDB).forEach(bot => {
         const ws = activeConnections.get(String(bot.id));
@@ -436,7 +428,8 @@ cron.schedule('* * * * *', () => {
 
         bot.contracts.forEach(c => {
             if (!c.expireTime) return;
-            // 预警
+            
+            // 1. 预警逻辑
             if (!c.preNotified && !c.notified && (c.expireTime - now < warnTime) && (c.expireTime > now)) {
                 if (isOnline) {
                     ws.send(JSON.stringify({ action: 'send_group_msg', params: { group_id: parseInt(c.groupId), message: warnMsg } }));
@@ -445,12 +438,32 @@ cron.schedule('* * * * *', () => {
                     changed = true;
                 }
             }
-            // 到期
+
+            // 2. 到期通知逻辑
             if (!c.notified && now > c.expireTime) {
                 if (isOnline) {
                     ws.send(JSON.stringify({ action: 'send_group_msg', params: { group_id: parseInt(c.groupId), message: notifyMsg } }));
                     writeLog('SYSTEM', 'EXPIRE_SENT', `Expiry sent to Group ${c.groupId}`);
                     c.notified = true;
+                    changed = true;
+                }
+            }
+
+            // 3. 自动退群逻辑
+            if (adminConfig.autoQuit && !c.leftGroup && now > (c.expireTime + quitWaitTime)) {
+                if (isOnline) {
+                    // 先发告别
+                    ws.send(JSON.stringify({ action: 'send_group_msg', params: { group_id: parseInt(c.groupId), message: adminConfig.quitMessage } }));
+                    
+                    // 延迟退群，防止消息没发出去
+                    setTimeout(() => {
+                        if (activeConnections.get(String(bot.id))) { // Double check connection
+                             ws.send(JSON.stringify({ action: 'set_group_leave', params: { group_id: parseInt(c.groupId) } }));
+                        }
+                    }, 2000);
+
+                    writeLog('SYSTEM', 'AUTO_QUIT', `Bot left Group ${c.groupId} due to expiry`);
+                    c.leftGroup = true;
                     changed = true;
                 }
             }
