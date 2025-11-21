@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -115,6 +116,7 @@
             const [showLogs, setShowLogs] = useState(false);
             const [showAddBot, setShowAddBot] = useState(false);
             const [showLoginHistory, setShowLoginHistory] = useState(false);
+            const [showRecycleBin, setShowRecycleBin] = useState(false);
             const [wsUrl, setWsUrl] = useState('');
 
             useEffect(() => {
@@ -129,7 +131,6 @@
                     const data = await res.json();
                     setBots(data);
                     
-                    // 更新当前正在编辑的 Bot 数据，确保弹窗内列表实时刷新
                     setEditingBot(prev => {
                         if (!prev) return null;
                         return data.find(b => b.id === prev.id) || prev;
@@ -152,6 +153,7 @@
                         </div>
                         
                         <button onClick={() => setShowAddBot(true)} className="nav-btn" title="新增">＋</button>
+                        <button onClick={() => setShowRecycleBin(true)} className="nav-btn" title="回收站">♻️</button>
                         <button onClick={() => setShowLoginHistory(true)} className="nav-btn" title="历史">🕒</button>
                         <button onClick={() => setShowLogs(true)} className="nav-btn" title="日志">📜</button>
                         <button onClick={() => setShowAdmin(true)} className="nav-btn" title="设置">⚙️</button>
@@ -181,6 +183,7 @@
                     {showLogs && <LogViewerModal token={token} apiHost={apiHost} onClose={() => setShowLogs(false)} />}
                     {showLoginHistory && <LoginHistoryModal token={token} apiHost={apiHost} onClose={() => setShowLoginHistory(false)} />}
                     {showAddBot && <AddBotModal token={token} apiHost={apiHost} onClose={() => setShowAddBot(false)} onSuccess={fetchBots} />}
+                    {showRecycleBin && <RecycleBinModal token={token} apiHost={apiHost} onClose={() => setShowRecycleBin(false)} onSuccess={fetchBots} />}
                 </div>
             );
         };
@@ -307,7 +310,6 @@
             const [realTimeGroups, setRealTimeGroups] = useState(new Set());
             const fileInputRef = useRef(null);
 
-            // 监听 bot 属性变化，实时更新本地 contracts 状态
             useEffect(() => {
                 setContracts(bot.contracts || []);
                 setName(bot.name);
@@ -323,7 +325,7 @@
                         if (Array.isArray(data)) setRealTimeGroups(new Set(data.map(g => String(g.group_id))));
                     }).catch(err => console.error(err));
                 }
-            }, [bot.id, bot.isOnline]); // 仅在 ID 或在线状态变更时重新拉取群列表
+            }, [bot.id, bot.isOnline]); 
 
             const handleSaveInfo = async () => {
                 await fetch(`${apiHost}/api/bot/update-info`, {
@@ -355,11 +357,22 @@
             };
 
             const handleDeleteContract = async (contractId) => {
-                if (!confirm('删除此授权？')) return;
+                // Soft delete
+                if (!confirm('确认删除？(将移入回收站)')) return;
                 await fetch(`${apiHost}/api/bot/contract/delete`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ botId: bot.id, contractId })
                 });
+                onSuccess();
+            };
+            
+            const handleDeleteBot = async () => {
+                if (!confirm('确认删除此机器人实例？(将移入回收站)')) return;
+                await fetch(`${apiHost}/api/bot/delete`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ id: bot.id })
+                });
+                onClose();
                 onSuccess();
             };
 
@@ -396,7 +409,10 @@
                                         <input className="form-control" value={name} onChange={e => setName(e.target.value)} />
                                     </div>
                                 </div>
-                                <button className="btn btn-primary" onClick={handleSaveInfo}>保存</button>
+                                <div style={{display:'flex', gap:'0.5rem'}}>
+                                    <button className="btn btn-primary" onClick={handleSaveInfo}>保存信息</button>
+                                    <button className="btn btn-danger" onClick={handleDeleteBot}>删除实例</button>
+                                </div>
                             </div>
 
                             <div>
@@ -493,6 +509,76 @@
                         </div>
                         <div className="modal-actions">
                             <button className="btn btn-primary" onClick={handleSend}>发送</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const RecycleBinModal = ({ token, apiHost, onClose, onSuccess }) => {
+            const [data, setData] = useState({ bots: [], contracts: [] });
+            const [tab, setTab] = useState('bots');
+
+            const fetchData = () => {
+                fetch(`${apiHost}/api/recycle-bin`, { headers: { 'Authorization': `Bearer ${token}` } })
+                    .then(r => r.json())
+                    .then(setData);
+            };
+
+            useEffect(() => { fetchData(); }, []);
+
+            const handleRestore = async (type, id, botId) => {
+                await fetch(`${apiHost}/api/recycle-bin/restore`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ type, id, botId })
+                });
+                fetchData();
+                onSuccess();
+            };
+
+            const handlePurge = async (type, id, botId) => {
+                if(!confirm('彻底删除？此操作无法撤销！')) return;
+                await fetch(`${apiHost}/api/recycle-bin/purge`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ type, id, botId })
+                });
+                fetchData();
+            };
+
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'600px'}}>
+                        <div className="modal-header"><h3>♻️ 回收站</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                        <div style={{display:'flex', borderBottom:'1px solid rgba(255,255,255,0.1)', padding:'0 1rem'}}>
+                            <div style={{padding:'1rem', cursor:'pointer', borderBottom: tab==='bots'?'2px solid var(--primary)':'none', color: tab==='bots'?'var(--primary)':'var(--text-secondary)'}} onClick={()=>setTab('bots')}>已删除实例 ({data.bots.length})</div>
+                            <div style={{padding:'1rem', cursor:'pointer', borderBottom: tab==='contracts'?'2px solid var(--primary)':'none', color: tab==='contracts'?'var(--primary)':'var(--text-secondary)'}} onClick={()=>setTab('contracts')}>已删除授权 ({data.contracts.length})</div>
+                        </div>
+                        <div className="modal-body" style={{maxHeight:'60vh', overflowY:'auto'}}>
+                            {tab === 'bots' && data.bots.map(b => (
+                                <div key={b.id} className="contract-item">
+                                    <div>
+                                        <div style={{fontWeight:600}}>{b.name}</div>
+                                        <div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>ID: {b.id}</div>
+                                    </div>
+                                    <div style={{display:'flex', gap:'0.5rem'}}>
+                                        <button className="btn btn-sm btn-success" style={{background:'rgba(48, 209, 88, 0.2)', color:'var(--success)'}} onClick={() => handleRestore('bot', b.id)}>恢复</button>
+                                        <button className="btn btn-sm btn-danger" onClick={() => handlePurge('bot', b.id)}>彻底删除</button>
+                                    </div>
+                                </div>
+                            ))}
+                            {tab === 'contracts' && data.contracts.map(c => (
+                                <div key={c.id} className="contract-item">
+                                    <div>
+                                        <div style={{fontWeight:600}}>{c.groupName || c.groupId}</div>
+                                        <div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>所属: {c.botName} ({c.botId})</div>
+                                    </div>
+                                    <div style={{display:'flex', gap:'0.5rem'}}>
+                                        <button className="btn btn-sm btn-success" style={{background:'rgba(48, 209, 88, 0.2)', color:'var(--success)'}} onClick={() => handleRestore('contract', c.id, c.botId)}>恢复</button>
+                                        <button className="btn btn-sm btn-danger" onClick={() => handlePurge('contract', c.id, c.botId)}>彻底删除</button>
+                                    </div>
+                                </div>
+                            ))}
+                            {(tab === 'bots' && data.bots.length === 0) || (tab === 'contracts' && data.contracts.length === 0) ? <div style={{textAlign:'center', padding:'2rem', color:'var(--text-muted)'}}>空空如也</div> : null}
                         </div>
                     </div>
                 </div>
