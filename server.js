@@ -182,6 +182,8 @@ if (fs.existsSync(DB_FILE)) {
 const saveDB = () => fs.writeFileSync(DB_FILE, JSON.stringify(botsDB, null, 2));
 
 const activeConnections = new Map(); 
+// 用于存储 HTTP 等待 WS 响应的 Promise
+const pendingRequests = new Map();
 
 // --- WebSocket ---
 wss.on('connection', (ws, req) => {
@@ -208,6 +210,16 @@ wss.on('connection', (ws, req) => {
         ws.on('message', (message) => {
             try {
                 const msg = JSON.parse(message);
+
+                // 处理 HTTP -> WS 的同步请求响应 (Echo 机制)
+                if (msg.echo && pendingRequests.has(msg.echo)) {
+                    const { resolve } = pendingRequests.get(msg.echo);
+                    resolve(msg);
+                    pendingRequests.delete(msg.echo);
+                    return; // 这是一个 API 调用响应，不处理为聊天消息
+                }
+
+                // 处理群消息指令
                 if (msg.post_type === 'message' && (msg.message_type === 'group' || (msg.message && msg.message_type === 'group'))) {
                     const rawText = msg.raw_message || msg.message || "";
                     const groupId = msg.group_id;
@@ -343,8 +355,102 @@ app.post('/api/bot/update-info', authenticateToken, (req, res) => {
     } else res.status(404).json({ error: 'Not Found' });
 });
 
+// 获取群信息的接口 (通过 Bot 转发)
+app.post('/api/bot/group-info', authenticateToken, async (req, res) => {
+    const { botId, groupId } = req.body;
+    const ws = activeConnections.get(String(botId));
+    
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return res.status(500).json({ error: 'Bot Offline' });
+    }
+
+    const echo = Date.now().toString(36) + Math.random().toString(36).substr(2);
+    
+    // 创建一个 Promise 等待 WebSocket 返回
+    const responsePromise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            pendingRequests.delete(echo);
+            reject(new Error('Timeout waiting for bot response'));
+        }, 5000); // 5秒超时
+
+        pendingRequests.set(echo, {
+            resolve: (data) => {
+                clearTimeout(timeout);
+                resolve(data);
+            },
+            reject
+        });
+    });
+
+    // 发送请求给 Bot
+    ws.send(JSON.stringify({
+        action: 'get_group_info',
+        params: { group_id: parseInt(groupId), no_cache: true },
+        echo
+    }));
+
+    try {
+        const data = await responsePromise;
+        if (data.status === 'ok' && data.data) {
+            res.json({ 
+                groupName: data.data.group_name,
+                memberCount: data.data.member_count
+            });
+        } else {
+            res.status(400).json({ error: 'Failed to get group info' });
+        }
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// 获取机器人所在的所有群列表
+app.post('/api/bot/group-list', authenticateToken, async (req, res) => {
+    const { botId } = req.body;
+    const ws = activeConnections.get(String(botId));
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return res.status(500).json({ error: 'Bot Offline' });
+    }
+
+    const echo = Date.now().toString(36) + Math.random().toString(36).substr(2);
+    
+    const responsePromise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            pendingRequests.delete(echo);
+            reject(new Error('Timeout waiting for bot response'));
+        }, 5000); 
+
+        pendingRequests.set(echo, {
+            resolve: (data) => {
+                clearTimeout(timeout);
+                resolve(data);
+            },
+            reject
+        });
+    });
+
+    ws.send(JSON.stringify({
+        action: 'get_group_list',
+        echo
+    }));
+
+    try {
+        const data = await responsePromise;
+        if (data.status === 'ok' && Array.isArray(data.data)) {
+            res.json(data.data); // 返回群数组
+        } else {
+            res.status(400).json({ error: 'Failed to get group list' });
+        }
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.post('/api/bot/contract/save', authenticateToken, (req, res) => {
-    const { botId, contractId, groupId, expireTime } = req.body;
+    const { botId, contractId, groupId, groupName, expireTime } = req.body;
     if (!botsDB[botId]) return res.status(404).json({ error: 'Not Found' });
     
     let contract = botsDB[botId].contracts.find(c => c.id === contractId);
@@ -357,18 +463,20 @@ app.post('/api/bot/contract/save', authenticateToken, (req, res) => {
         }
         contract.groupId = groupId;
         contract.expireTime = expireTime;
-        writeLog('USER', 'UPDATE_CONTRACT', `Updated contract for Group ${groupId}`);
+        if (groupName) contract.groupName = groupName; // 更新群名
+        writeLog('USER', 'UPDATE_CONTRACT', `Updated contract for Group ${groupId} (${groupName||''})`);
     } else {
         contract = {
             id: Date.now().toString(36) + Math.random().toString(36).substr(2),
             groupId,
+            groupName: groupName || `群 ${groupId}`,
             expireTime,
             notified: false,
             preNotified: false,
             leftGroup: false
         };
         botsDB[botId].contracts.push(contract);
-        writeLog('USER', 'ADD_CONTRACT', `Added contract for Group ${groupId}`);
+        writeLog('USER', 'ADD_CONTRACT', `Added contract for Group ${groupId} (${groupName||''})`);
     }
     saveDB();
     res.json({ success: true });
