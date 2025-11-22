@@ -16,6 +16,39 @@
         const { useState, useEffect, useRef, useMemo } = React;
         const { createRoot } = ReactDOM;
 
+        // --- SVG Icons Collection ---
+        const Icons = {
+            // User Provided Gradient Icons
+            Search: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradS1" x1="4.696" x2="21.274" y1="4.696" y2="21.274" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradS1)" d="M21.414,18.586c-0.287-0.287-1.942-1.942-2.801-2.801l0,0C19.487,14.398,20,12.76,20,11 c0-4.971-4.029-9-9-9s-9,4.029-9,9c0,4.971,4.029,9,9,9c1.761,0,3.398-0.513,4.785-1.387c0,0,0,0,0,0 c0.859,0.859,2.514,2.514,2.801,2.801c0.781,0.781,2.047,0.781,2.828,0C22.195,20.633,22.195,19.367,21.414,18.586z M11,16 c-2.761,0-5-2.239-5-5s2.239-5,5-5s5,2.239,5,5S13.761,16,11,16z"/><linearGradient id="gradS2" x1="4.636" x2="21.414" y1="4.636" y2="21.414" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradS2)" d="M11,2.5c4.687,0,8.5,3.813,8.5,8.5 c0,1.595-0.453,3.158-1.31,4.518l-0.213,0.338l0.282,0.282l2.801,2.801C21.344,19.223,21.5,19.599,21.5,20 c0,0.401-0.156,0.777-0.439,1.061C20.777,21.344,20.401,21.5,20,21.5s-0.777-0.156-1.061-0.439l-2.801-2.801l-0.282-0.282 l-0.338,0.213C14.158,19.047,12.595,19.5,11,19.5c-4.687,0-8.5-3.813-8.5-8.5S6.313,2.5,11,2.5 M11,16.5 c3.033,0,5.5-2.467,5.5-5.5S14.033,5.5,11,5.5S5.5,7.967,5.5,11S7.967,16.5,11,16.5 M11,2c-4.971,0-9,4.029-9,9 c0,4.971,4.029,9,9,9c1.761,0,3.398-0.513,4.785-1.387c0,0,0,0,0,0c0,0,0,0,0,0c0,0,0,0,0,0c0.859,0.859,2.514,2.514,2.801,2.801 C18.976,21.805,19.488,22,20,22c0.512,0,1.024-0.195,1.414-0.586c0.781-0.781,0.781-2.047,0-2.828 c-0.287-0.287-1.942-1.942-2.801-2.801C19.487,14.398,20,12.76,20,11C20,6.029,15.971,2,11,2L11,2z M11,16c-2.761,0-5-2.239-5-5 c0-2.761,2.239-5,5-5c2.761,0,5,2.239,5,5C16,13.761,13.761,16,11,16L11,16z"/></svg>,
+            
+            Plus: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradP1" x1="4.929" x2="19.071" y1="4.929" y2="19.071" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><circle cx="12" cy="12" r="10" fill="url(#gradP1)"/><linearGradient id="gradP2" x1="4.929" x2="19.071" y1="4.929" y2="19.071" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradP2)" d="M12,2.5c5.238,0,9.5,4.262,9.5,9.5 s-4.262,9.5-9.5,9.5S2.5,17.238,2.5,12S6.762,2.5,12,2.5 M12,2C6.477,2,2,6.477,2,12s4.477,10,10,10s10-4.477,10-10S17.523,2,12,2 L12,2z"/><linearGradient id="gradP3" x1="8.793" x2="15.207" y1="8.793" y2="15.207" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".7"/><stop offset=".519" stopColor="#fff" stopOpacity=".45"/><stop offset="1" stopColor="#fff" stopOpacity=".55"/></linearGradient><path fill="url(#gradP3)" d="M17,11h-4V7c0-0.552-0.448-1-1-1 s-1,0.448-1,1v4H7c-0.552,0-1,0.448-1,1c0,0.552,0.448,1,1,1h4v4c0,0.552,0.448,1,1,1s1-0.448,1-1v-4h4c0.552,0,1-0.448,1-1 C18,11.448,17.552,11,17,11z"/></svg>,
+
+            Recycle: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradR1" x1="4.144" x2="19.856" y1="3.027" y2="18.739" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradR1)" d="M21,5c0-1.105-0.895-2-2-2c-0.174,0-1.373,0-3,0c0-0.552-0.448-1-1-1H9C8.448,2,8,2.448,8,3 C6.373,3,5.174,3,5,3C3.895,3,3,3.895,3,5c0,0.778,0.449,1.444,1.097,1.775l1.575,12.597C5.859,20.873,7.135,22,8.648,22h6.703 c1.513,0,2.789-1.127,2.977-2.628l1.575-12.597C20.551,6.444,21,5.778,21,5z"/><linearGradient id="gradR2" x1="4.144" x2="19.856" y1="3.027" y2="18.739" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradR2)" d="M15,2.5c0.276,0,0.5,0.224,0.5,0.5v0.5H16 h3c0.827,0,1.5,0.673,1.5,1.5c0,0.561-0.316,1.07-0.824,1.33L19.44,6.45l-0.033,0.263L17.832,19.31 c-0.156,1.248-1.223,2.19-2.481,2.19H8.648c-1.258,0-2.325-0.941-2.481-2.19L4.593,6.713L4.56,6.45L4.324,6.33 C3.816,6.07,3.5,5.561,3.5,5c0-0.827,0.673-1.5,1.5-1.5h3h0.5V3c0-0.276,0.224-0.5,0.5-0.5H15 M15,2H9C8.448,2,8,2.448,8,3 C6.373,3,5.174,3,5,3C3.895,3,3,3.895,3,5c0,0.778,0.449,1.444,1.097,1.775l1.575,12.597C5.859,20.873,7.135,22,8.648,22h6.703 c1.513,0,2.789-1.127,2.977-2.628l1.575-12.597C20.551,6.444,21,5.778,21,5c0-1.105-0.895-2-2-2c-0.174,0-1.373,0-3,0 C16,2.448,15.552,2,15,2L15,2z"/><linearGradient id="gradR3" x1="7.086" x2="16.914" y1=".086" y2="9.914" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".7"/><stop offset=".519" stopColor="#fff" stopOpacity=".45"/><stop offset="1" stopColor="#fff" stopOpacity=".55"/></linearGradient><path fill="url(#gradR3)" d="M19,3c-0.174,0-1.373,0-3,0 c0-0.552-0.448-1-1-1H9C8.448,2,8,2.448,8,3C6.373,3,5.174,3,5,3C3.895,3,3,3.895,3,5c0,1.105,0.895,2,2,2c0.601,0,13.399,0,14,0 c1.105,0,2-0.895,2-2C21,3.895,20.105,3,19,3z"/></svg>,
+
+            History: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradH1" x1="2.629" x2="21.164" y1="3.129" y2="21.664" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradH1)" d="M21,16h-2V6c0-1.657-1.343-3-3-3H4C2.343,3,1,4.343,1,6v1c0,1.105,0.895,2,2,2h1v9 c0,1.657,1.343,3,3,3h14c1.105,0,2-0.895,2-2v-1C23,16.895,22.105,16,21,16z"/><linearGradient id="gradH2" x1="2.629" x2="21.164" y1="3.129" y2="21.664" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradH2)" d="M16,3.5c1.379,0,2.5,1.122,2.5,2.5v10v0.5 H19h2c0.827,0,1.5,0.673,1.5,1.5v1c0,0.827-0.673,1.5-1.5,1.5H7c-1.378,0-2.5-1.121-2.5-2.5V9V8.5H4H3C2.173,8.5,1.5,7.827,1.5,7V6 c0-1.378,1.122-2.5,2.5-2.5H16 M16,3H4C2.343,3,1,4.343,1,6v1c0,1.105,0.895,2,2,2h1v9c0,1.657,1.343,3,3,3h14c1.105,0,2-0.895,2-2 v-1c0-1.105-0.895-2-2-2h-2V6C19,4.343,17.657,3,16,3L16,3z"/><linearGradient id="gradH3" x1="4.422" x2="11.957" y1="1.336" y2="8.871" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".7"/><stop offset=".519" stopColor="#fff" stopOpacity=".45"/><stop offset="1" stopColor="#fff" stopOpacity=".55"/></linearGradient><path fill="url(#gradH3)" d="M13,6v1c0,1.105-0.895,2-2,2H3 C1.895,9,1,8.105,1,7V6c0-1.657,1.343-3,3-3h12h0C14.343,3,13,4.343,13,6z"/><linearGradient id="gradH4" x1="18.75" x2="22.664" y1="16.25" y2="20.164" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".7"/><stop offset=".519" stopColor="#fff" stopOpacity=".45"/><stop offset="1" stopColor="#fff" stopOpacity=".55"/></linearGradient><path fill="url(#gradH4)" d="M21,16h-2v3c0,1.105,0.895,2,2,2h0 c1.105,0,2-0.895,2-2v-1C23,16.895,22.105,16,21,16z"/></svg>,
+
+            FileText: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradF1" x1="3" x2="19.828" y1="3.586" y2="20.414" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradF1)" d="M4,21V3c0-0.552-0.448-1,1-1h12c1.657,0,3,1.343,3,3v14c0,1.657-1.343,3-3,3H5 C4.448,22,4,21.552,4,21z"/><linearGradient id="gradF2" x1="3" x2="19.828" y1="3.586" y2="20.414" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradF2)" d="M17,2.5c1.379,0,2.5,1.122,2.5,2.5v14 c0,1.378-1.121,2.5-2.5,2.5H5c-0.276,0-0.5-0.224-0.5-0.5V3c0-0.276,0.224-0.5,0.5-0.5H17 M17,2H5C4.448,2,4,2.448,4,3v18 c0,0.552,0.448,1,1,1h12c1.657,0,3-1.343,3-3V5C20,3.343,18.657,2,17,2L17,2z"/><linearGradient id="gradF3" x1="6.615" x2="14.385" y1="3.385" y2="11.156" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".7"/><stop offset=".519" stopColor="#fff" stopOpacity=".45"/><stop offset="1" stopColor="#fff" stopOpacity=".55"/></linearGradient><path fill="url(#gradF3)" d="M13,2H8v10.216 c0,0.656,0.759,1.021,1.271,0.611l1.229-0.983l1.229,0.983C12.241,13.237,13,12.872,13,12.216V2z"/></svg>,
+
+            Settings: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradSet1" x1="4.964" x2="19.036" y1="4.964" y2="19.036" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradSet1)" d="M20,12c0-0.761,0.342-1.437,0.88-1.893c0.479-0.406,0.689-1.05,0.467-1.638 c-0.387-1.026-0.937-1.972-1.621-2.805c-0.383-0.467-1.028-0.647-1.592-0.43C17.459,5.496,16.678,5.463,16,5.072 c-0.68-0.393-1.1-1.056-1.21-1.775c-0.09-0.588-0.556-1.058-1.143-1.158C13.111,2.048,12.561,2,12,2s-1.111,0.048-1.647,0.139 C9.766,2.239,9.301,2.708,9.21,3.297C9.1,4.016,8.68,4.679,8,5.072C7.322,5.463,6.541,5.496,5.865,5.235 c-0.563-0.217-1.208-0.037-1.592,0.43C3.59,6.498,3.04,7.443,2.653,8.47C2.431,9.057,2.641,9.702,3.12,10.107 C3.658,10.563,4,11.239,4,12s-0.342,1.437-0.88,1.893c-0.479,0.406-0.689,1.05-0.467,1.638c0.387,1.026,0.937,1.972,1.621,2.805 c0.383,0.467,1.028,0.647,1.592,0.43C6.541,18.504,7.322,18.537,8,18.928c0.68,0.393,1.1,1.056,1.21,1.775 c0.09,0.588,0.556,1.058,1.143,1.158C10.889,21.952,11.439,22,12,22s1.111-0.048,1.647-0.139c0.587-0.099,1.053-0.569,1.143-1.158 c0.11-0.719,0.53-1.382,1.21-1.775c0.678-0.391,1.459-0.424,2.135-0.164c0.564,0.217,1.209,0.037,1.592-0.43 c0.683-0.833,1.234-1.778,1.621-2.805c0.221-0.587,0.012-1.232-0.467-1.638C20.342,13.437,20,12.761,20,12z M12,16 c-2.209,0-4-1.791-4-4c0-2.209,1.791-4,4-4s4,1.791,4,4C16,14.209,14.209,16,12,16z"/><linearGradient id="gradSet2" x1="4.964" x2="19.036" y1="4.964" y2="19.036" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradSet2)" d="M12,2.5c0.52,0,1.046,0.044,1.563,0.132 C13.937,2.696,14.238,3,14.296,3.373c0.138,0.901,0.669,1.678,1.454,2.132c0.452,0.261,0.965,0.399,1.484,0.399 c0.37,0,0.733-0.068,1.081-0.202c0.1-0.039,0.205-0.058,0.313-0.058c0.272,0,0.538,0.126,0.712,0.338 c0.657,0.801,1.175,1.697,1.539,2.664c0.14,0.371,0.013,0.795-0.323,1.08C19.885,10.294,19.5,11.123,19.5,12 c0,0.877,0.385,1.706,1.057,2.274c0.336,0.285,0.463,0.708,0.323,1.08c-0.365,0.967-0.883,1.863-1.539,2.664 c-0.174,0.212-0.44,0.338-0.712,0.338c-0.108,0-0.214-0.02-0.313-0.058c-0.347-0.134-0.711-0.202-1.081-0.202 c-0.519,0-1.032,0.138-1.484,0.399c-0.786,0.454-1.316,1.231-1.454,2.132c-0.057,0.373-0.358,0.677-0.732,0.741 C13.046,21.456,12.52,21.5,12,21.5s-1.046-0.044-1.563-0.132C10.063,21.304,9.762,21,9.704,20.627 c-0.138-0.901-0.669-1.678-1.454-2.132c-0.452-0.261-0.965-0.399-1.484-0.399c-0.37,0-0.734,0.068-1.081,0.202 c-0.1,0.039-0.205,0.058-0.314,0.058c-0.272,0-0.538-0.126-0.712-0.338c-0.657-0.801-1.175-1.697-1.539-2.664 c-0.14-0.371-0.013-0.795,0.323-1.08C4.115,13.706,4.5,12.877,4.5,12c0-0.877-0.385-1.706-1.057-2.274 c-0.336-0.285-0.463-0.708-0.323-1.08C3.485,7.679,4.003,6.783,4.66,5.982C4.834,5.77,5.1,5.644,5.372,5.644 c0.108,0,0.214,0.02,0.314,0.058c0.347,0.134,0.711,0.202,1.081,0.202c0.519,0,1.032-0.138,1.484-0.399 c0.786-0.454,1.316-1.231,1.454-2.132C9.762,3,10.063,2.696,10.437,2.632C10.954,2.544,11.48,2.5,12,2.5 M12,16.5 c2.481,0,4.5-2.019,4.5-4.5S14.481,7.5,12,7.5S7.5,9.519,7.5,12S9.519,16.5,12,16.5 M12,2c-0.561,0-1.111,0.048-1.647,0.139 C9.766,2.239,9.301,2.708,9.21,3.297C9.1,4.016,8.68,4.679,8,5.072C7.61,5.297,7.185,5.404,6.766,5.404 c-0.309,0-0.614-0.058-0.901-0.168c-0.16-0.062-0.328-0.092-0.493-0.092c-0.416,0-0.824,0.187-1.098,0.521 C3.59,6.498,3.04,7.443,2.653,8.47C2.431,9.057,2.641,9.702,3.12,10.107C3.658,10.563,4,11.239,4,12s-0.342,1.437-0.88,1.893 c-0.479,0.406-0.689,1.05-0.467,1.638c0.387,1.026,0.937,1.972,1.621,2.805c0.274,0.334,0.682,0.521,1.098,0.521 c0.166,0,0.333-0.03,0.493-0.092c0.287-0.111,0.592-0.168,0.901-0.168c0.419,0,0.844,0.107,1.234,0.332 c0.68,0.393,1.1,1.056,1.21,1.775c0.09,0.588,0.556,1.058,1.143,1.158C10.889,21.952,11.439,22,12,22s1.111-0.048,1.647-0.139 c0.587-0.099,1.053-0.569,1.143-1.158c0.11-0.719,0.53-1.382,1.21-1.775c0.39-0.225,0.815-0.332,1.234-0.332 c0.309,0,0.614,0.058,0.901,0.168c0.16,0.062,0.328,0.092,0.493,0.092c0.416,0,0.824-0.187,1.098-0.521 c0.683-0.833,1.234-1.778,1.621-2.805c0.221-0.587,0.012-1.232-0.467-1.638C20.342,13.437,20,12.761,20,12s0.342-1.437,0.88-1.893 c0.479-0.406,0.689-1.05,0.467-1.638c-0.387-1.026-0.937-1.972-1.621-2.805c-0.274-0.334-0.682-0.521-1.098-0.521 c-0.166,0-0.333,0.03-0.493,0.092c-0.287,0.111-0.592,0.168-0.901,0.168c-0.419,0-0.844-0.107-1.234-0.332 c-0.68-0.393-1.1-1.056-1.21-1.775c-0.09-0.588-0.556-1.058-1.143-1.158C13.111,2.048,12.561,2,12,2L12,2z M12,16 c-2.209,0-4-1.791-4-4c0-2.209,1.791-4,4-4s4,1.791,4,4C16,14.209,14.209,16,12,16L12,16z"/></svg>,
+
+            X: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradX1" x1="4.929" x2="19.071" y1="4.929" y2="19.071" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><circle cx="12" cy="12" r="10" fill="url(#gradX1)"/><linearGradient id="gradX2" x1="4.929" x2="19.071" y1="4.929" y2="19.071" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradX2)" d="M12,2.5c5.238,0,9.5,4.262,9.5,9.5 s-4.262,9.5-9.5,9.5S2.5,17.238,2.5,12S6.762,2.5,12,2.5 M12,2C6.477,2,2,6.477,2,12s4.477,10,10,10s10-4.477,10-10S17.523,2,12,2 L12,2z"/><linearGradient id="gradX3" x1="7.791" x2="16.209" y1="7.79" y2="16.209" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".7"/><stop offset=".519" stopColor="#fff" stopOpacity=".45"/><stop offset="1" stopColor="#fff" stopOpacity=".55"/></linearGradient><path fill="url(#gradX3)" d="M13.403,12l2.812-2.812 c0.384-0.384,0.384-1.008,0-1.392l-0.011-0.011c-0.384-0.384-1.008-0.384-1.392,0L12,10.597L9.188,7.785 c-0.384-0.384-1.008-0.384-1.392,0L7.785,7.796c-0.384,0.385-0.384,1.008,0,1.392L10.597,12l-2.812,2.812 c-0.384,0.384-0.384,1.008,0,1.392l0.011,0.011c0.384,0.384,1.008,0.384,1.392,0L12,13.403l2.812,2.812 c0.384,0.384,1.008,0.384,1.392,0l0.011-0.011c0.384-0.384,0.384-1.008,0-1.392L13.403,12z"/></svg>,
+
+            Upload: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradU1" x1="4.697" x2="19.095" y1="6.993" y2="21.391" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradU1)" d="M19.483,8.192C18.345,5.161,15.429,3,12,3c-4.112,0-7.496,3.104-7.945,7.095 C1.746,10.538,0,12.562,0,15c0,2.761,2.239,5,5,5h13c3.314,0,6-2.686,6-6C24,11.199,22.078,8.854,19.483,8.192z"/><linearGradient id="gradU2" x1="0" x2="24" y1="11.5" y2="11.5" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradU2)" d="M12,3.5c3.103,0,5.922,1.956,7.015,4.868 l0.092,0.244l0.253,0.064c2.438,0.621,4.14,2.81,4.14,5.323c0,3.033-2.467,5.5-5.5,5.5H5c-2.481,0-4.5-2.019-4.5-4.5 c0-2.152,1.535-4.008,3.649-4.414l0.361-0.069l0.041-0.366C4.979,6.359,8.181,3.5,12,3.5 M12,3c-4.112,0-7.496,3.104-7.945,7.095 C1.746,10.538,0,12.562,0,15c0,2.761,2.239,5,5,5h13c3.314,0,6-2.686,6-6c0-2.801-1.922-5.146-4.517-5.808 C18.345,5.161,15.429,3,12,3L12,3z"/><linearGradient id="gradU3" x1="9.398" x2="14.602" y1="9.767" y2="14.97" gradientTransform="rotate(180 12 12.79)" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".7"/><stop offset=".519" stopColor="#fff" stopOpacity=".45"/><stop offset="1" stopColor="#fff" stopOpacity=".55"/></linearGradient><path fill="url(#gradU3)" d="M8.706,13H11v4c0,0.552,0.448,1,1,1 s1-0.448,1-1v-4h2.294c0.615,0,0.924-0.742,0.491-1.178L12.71,8.717c-0.391-0.395-1.03-0.395-1.421,0l-3.075,3.104 C7.782,12.258,8.092,13,8.706,13z"/></svg>,
+
+            Download: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradD1" x1="4.697" x2="19.095" y1="6.993" y2="21.391" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradD1)" d="M19.483,8.192C18.345,5.161,15.429,3,12,3c-4.112,0-7.496,3.104-7.945,7.095 C1.746,10.538,0,12.562,0,15c0,2.761,2.239,5,5,5h13c3.314,0,6-2.686,6-6C24,11.199,22.078,8.854,19.483,8.192z"/><linearGradient id="gradD2" x1="0" x2="24" y1="11.5" y2="11.5" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradD2)" d="M12,3.5c3.103,0,5.922,1.956,7.015,4.868 l0.092,0.244l0.253,0.064c2.438,0.621,4.14,2.81,4.14,5.323c0,3.033-2.467,5.5-5.5,5.5H5c-2.481,0-4.5-2.019-4.5-4.5 c0-2.152,1.535-4.008,3.649-4.414l0.361-0.069l0.041-0.366C4.979,6.359,8.181,3.5,12,3.5 M12,3c-4.112,0-7.496,3.104-7.945,7.095 C1.746,10.538,0,12.562,0,15c0,2.761,2.239,5,5,5h13c3.314,0,6-2.686,6-6c0-2.801-1.922-5.146-4.517-5.808 C18.345,5.161,15.429,3,12,3L12,3z"/><linearGradient id="gradD3" x1="9.398" x2="14.602" y1="9.767" y2="14.97" gradientTransform="rotate(180 12 12.79)" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".7"/><stop offset=".519" stopColor="#fff" stopOpacity=".45"/><stop offset="1" stopColor="#fff" stopOpacity=".55"/></linearGradient><path fill="url(#gradD3)" d="M8.706,13H11v4c0,0.552,0.448,1,1,1 s1-0.448,1-1v-4h2.294c0.615,0,0.924-0.742,0.491-1.178L12.71,8.717c-0.391-0.395-1.03-0.395-1.421,0l-3.075,3.104 C7.782,12.258,8.092,13,8.706,13z"/></svg>,
+
+            Check: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradC1" x1="4.697" x2="19.095" y1="6.993" y2="21.391" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradC1)" d="M19.483,8.192C18.345,5.161,15.429,3,12,3c-4.112,0-7.496,3.104-7.945,7.095 C1.746,10.538,0,12.562,0,15c0,2.761,2.239,5,5,5h13c3.314,0,6-2.686,6-6C24,11.199,22.078,8.854,19.483,8.192z"/><linearGradient id="gradC2" x1="0" x2="24" y1="11.5" y2="11.5" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradC2)" d="M12,3.5c3.103,0,5.922,1.956,7.015,4.868 l0.092,0.244l0.253,0.064c2.438,0.621,4.14,2.81,4.14,5.323c0,3.033-2.467,5.5-5.5,5.5H5c-2.481,0-4.5-2.019-4.5-4.5 c0-2.152,1.535-4.008,3.649-4.414l0.361-0.069l0.041-0.366C4.979,6.359,8.181,3.5,12,3.5 M12,3c-4.112,0-7.496,3.104-7.945,7.095 C1.746,10.538,0,12.562,0,15c0,2.761,2.239,5,5,5h13c3.314,0,6-2.686,6-6c0-2.801-1.922-5.146-4.517-5.808 C18.345,5.161,15.429,3,12,3L12,3z"/><linearGradient id="gradC3" x1="9.398" x2="14.602" y1="10.188" y2="15.391" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".7"/><stop offset=".519" stopColor="#fff" stopOpacity=".45"/><stop offset="1" stopColor="#fff" stopOpacity=".55"/></linearGradient><path fill="url(#gradC3)" d="M15.294,13H13V9c0-0.552-0.448-1-1-1 s-1,0.448-1,1v4H8.706c-0.615,0-0.924,0.742-0.491,1.178l3.075,3.104c0.391,0.395,1.03,0.395,1.421,0l3.075-3.104 C16.218,13.742,15.908,13,15.294,13z"/></svg>,
+
+            LogOut: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><linearGradient id="gradL1" x1="4.929" x2="19.071" y1="4.929" y2="19.071" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset="1" stopColor="#fff" stopOpacity=".3"/></linearGradient><circle cx="12" cy="12" r="10" fill="url(#gradL1)"/><linearGradient id="gradL2" x1="4.929" x2="19.071" y1="4.929" y2="19.071" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".6"/><stop offset=".493" stopColor="#fff" stopOpacity="0"/><stop offset=".997" stopColor="#fff" stopOpacity=".3"/></linearGradient><path fill="url(#gradL2)" d="M12,2.5c5.238,0,9.5,4.262,9.5,9.5 s-4.262,9.5-9.5,9.5S2.5,17.238,2.5,12S6.762,2.5,12,2.5 M12,2C6.477,2,2,6.477,2,12s4.477,10,10,10s10-4.477,10-10S17.523,2,12,2 L12,2z"/><linearGradient id="gradL3" x1="7.791" x2="16.209" y1="7.79" y2="16.209" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fff" stopOpacity=".7"/><stop offset=".519" stopColor="#fff" stopOpacity=".45"/><stop offset="1" stopColor="#fff" stopOpacity=".55"/></linearGradient><path fill="url(#gradL3)" d="M13.403,12l2.812-2.812 c0.384-0.384,0.384-1.008,0-1.392l-0.011-0.011c-0.384-0.384-1.008-0.384-1.392,0L12,10.597L9.188,7.785 c-0.384-0.384-1.008-0.384-1.392,0L7.785,7.796c-0.384,0.385-0.384,1.008,0,1.392L10.597,12l-2.812,2.812 c-0.384,0.384-0.384,1.008,0,1.392l0.011,0.011c0.384,0.384,1.008,0.384,1.392,0L12,13.403l2.812,2.812 c0.384,0.384,1.008,0.384,1.392,0l0.011-0.011c0.384-0.384,0.384-1.008,0-1.392L13.403,12z"/></svg>,
+
+            // Fallback Line Icons (Custom Styled)
+            Rocket: () => <svg className="icon-line" viewBox="0 0 24 24"><path d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.39a4.493 4.493 0 00-1.757 4.306 4.493 4.493 0 004.306-1.758M16.5 9a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" /></svg>,
+            Robot: () => <svg className="icon-line" viewBox="0 0 24 24"><path d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12h1.5m12 0h1.5m-15 3.75h3m-3.75 0H1.5m12 0h3m-3.75 0H18m-1.5-10.5v.008c0 .005.002.01.006.014.004.005.01.006.014.006h.008c.005 0 .01-.002.014-.006.005-.004.006-.01.006-.014v-.008a.027.027 0 00-.02-.02.027.027 0 00-.02.02zM8.25 9.008v.008c0 .005.002.01.006.014.004.005.01.006.014.006h.008c.005 0 .01-.002.014-.006.005-.004.006-.01.006-.014v-.008a.027.027 0 00-.02-.02.027.027 0 00-.02.02zM18.228 6.007v10.692a3 3 0 01-2.998 3.003h-6.46a3 3 0 01-2.998-3.003V6.007a3 3 0 013-3h6.458a3 3 0 012.998 3z" /></svg>,
+            Ghost: () => <svg className="icon-line" viewBox="0 0 24 24"><path d="M12 20.25c2.73 0 4.886-1.488 4.886-4.815V7.5h-9.772v7.935c0 3.327 2.156 4.815 4.886 4.815z" /><path d="M9.5 10.5a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0zM14.5 10.5a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0z" /></svg>,
+            Alert: () => <svg className="icon-line" viewBox="0 0 24 24"><path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>,
+            Sort: () => <svg className="icon-line" viewBox="0 0 24 24"><path d="M3 7.5L7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" /></svg>,
+        };
+
         const App = () => {
             const [token, setToken] = useState(localStorage.getItem('token'));
             const apiHost = ''; 
@@ -160,13 +193,13 @@
                             <span className="header-subtitle" style={{opacity: 0.6}}>WS: {wsUrl}</span>
                         </div>
                         
-                        <button onClick={() => setShowAddBot(true)} className="nav-btn" title="新增">＋</button>
-                        <button onClick={() => setShowSearch(true)} className="nav-btn" title="全局搜索">🔍</button>
-                        <button onClick={() => setShowRecycleBin(true)} className="nav-btn" title="回收站">♻️</button>
-                        <button onClick={() => setShowLoginHistory(true)} className="nav-btn" title="历史">🕒</button>
-                        <button onClick={() => setShowLogs(true)} className="nav-btn" title="日志">📜</button>
-                        <button onClick={() => setShowAdmin(true)} className="nav-btn" title="设置">⚙️</button>
-                        <button onClick={onLogout} className="nav-btn" style={{color:'#FF453A'}} title="退出">✕</button>
+                        <button onClick={() => setShowAddBot(true)} className="nav-btn" title="新增"><Icons.Plus /></button>
+                        <button onClick={() => setShowSearch(true)} className="nav-btn" title="全局搜索"><Icons.Search /></button>
+                        <button onClick={() => setShowRecycleBin(true)} className="nav-btn" title="回收站"><Icons.Recycle /></button>
+                        <button onClick={() => setShowLoginHistory(true)} className="nav-btn" title="历史"><Icons.History /></button>
+                        <button onClick={() => setShowLogs(true)} className="nav-btn" title="日志"><Icons.FileText /></button>
+                        <button onClick={() => setShowAdmin(true)} className="nav-btn" title="设置"><Icons.Settings /></button>
+                        <button onClick={onLogout} className="nav-btn" title="退出"><Icons.LogOut /></button>
                     </div>
 
                     {loading && bots.length === 0 ? (
@@ -178,7 +211,9 @@
                             ))}
                             {bots.length === 0 && (
                                 <div style={{gridColumn:'1/-1', textAlign:'center', padding:'4rem', color:'rgba(255,255,255,0.4)'}}>
-                                    <div style={{fontSize:'3rem', marginBottom:'1rem'}}>🚀</div>
+                                    <div style={{width: '80px', height: '80px', margin: '0 auto 1rem', color: 'var(--text-muted)'}}>
+                                        <Icons.Rocket />
+                                    </div>
                                     <h3>暂无实例</h3>
                                     <p>请点击 “＋” 新增实例</p>
                                 </div>
@@ -211,9 +246,12 @@
                     <div className="bot-info">
                         <div className="bot-avatar">
                             {hasCustomAvatar ? 
-                                <img src={bot.avatar} alt="avatar" onError={(e)=>{e.target.style.display='none';e.target.parentElement.innerText='👾'}} /> 
-                                : (bot.avatar || '👾')
+                                <img src={bot.avatar} alt="avatar" onError={(e)=>{e.target.style.display='none';e.target.nextSibling.style.display='block'}} /> 
+                                : null
                             }
+                            <div style={{display: hasCustomAvatar ? 'none' : 'block', width: '32px', height: '32px', color: 'var(--text-muted)'}}>
+                                <Icons.Robot />
+                            </div>
                         </div>
                         <div className="bot-details">
                             <h3>{bot.name}</h3>
@@ -315,7 +353,6 @@
             const [ghosts, setGhosts] = useState([]);
             const [loading, setLoading] = useState(true);
             const [selected, setSelected] = useState(new Set());
-            const [scanning, setScanning] = useState(false);
 
             const scan = async () => {
                 setLoading(true);
@@ -358,7 +395,10 @@
             return (
                 <div className="modal-overlay" style={{zIndex: 1100}} onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'500px'}}>
-                        <div className="modal-header"><h3>👻 幽灵群扫描</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                        <div className="modal-header">
+                            <h3 style={{gap:'0.5rem'}}><Icons.Ghost /> 幽灵群扫描</h3>
+                            <button className="nav-btn" onClick={onClose}><Icons.X /></button>
+                        </div>
                         <div className="modal-body">
                             <p style={{color:'var(--text-secondary)', fontSize:'0.9rem', marginBottom:'1rem'}}>
                                 幽灵群指机器人已加入，但未在面板授权的群。
@@ -366,7 +406,10 @@
                             {loading ? (
                                 <div style={{textAlign:'center', padding:'2rem'}}>扫描中...</div>
                             ) : ghosts.length === 0 ? (
-                                <div style={{textAlign:'center', padding:'2rem', color:'var(--success)'}}>✅ 未发现幽灵群</div>
+                                <div style={{textAlign:'center', padding:'2rem', color:'var(--success)', display:'flex', flexDirection:'column', alignItems:'center', gap:'1rem'}}>
+                                    <div style={{width:'40px', color:'var(--success)'}}><Icons.Check /></div>
+                                    ✅ 未发现幽灵群
+                                </div>
                             ) : (
                                 <div>
                                     <div style={{maxHeight:'300px', overflowY:'auto', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'var(--radius-sm)', padding:'0.5rem'}}>
@@ -416,9 +459,13 @@
             return (
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'500px'}}>
-                        <div className="modal-header"><h3>🔍 全局搜索</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                        <div className="modal-header">
+                            <h3 style={{whiteSpace:'nowrap'}}><Icons.Search /> 全局搜索</h3>
+                            <button className="nav-btn" onClick={onClose}><Icons.X /></button>
+                        </div>
                         <div className="modal-body">
-                            <div className="form-group">
+                            <div className="form-group input-with-icon">
+                                <Icons.Search />
                                 <input className="form-control" value={term} onChange={e => setTerm(e.target.value)} placeholder="输入群号或群名称..." autoFocus />
                             </div>
                             <div style={{marginTop:'1rem', maxHeight:'400px', overflowY:'auto'}}>
@@ -452,6 +499,7 @@
             const [contracts, setContracts] = useState(bot.contracts || []);
             const [editingContract, setEditingContract] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
+            const [sortOrder, setSortOrder] = useState('asc');
             const [realTimeGroups, setRealTimeGroups] = useState(new Set());
             const [showGhostScan, setShowGhostScan] = useState(false);
             const fileInputRef = useRef(null);
@@ -492,6 +540,11 @@
                     setAvatar(data.url);
                 } catch (err) { alert('上传失败'); }
             };
+            
+            const handleSetQQAvatar = () => {
+                const id = prompt("输入QQ号获取头像:", bot.id);
+                if(id) setAvatar(`https://q1.qlogo.cn/g?b=qq&nk=${id}&s=100`);
+            }
 
             const handleSaveContract = async (cData) => {
                 await fetch(`${apiHost}/api/bot/contract/save`, {
@@ -503,7 +556,6 @@
             };
 
             const handleDeleteContract = async (contractId) => {
-                // Soft delete
                 if (!confirm('确认删除？(将移入回收站)')) return;
                 await fetch(`${apiHost}/api/bot/contract/delete`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -531,23 +583,33 @@
                 onSuccess();
             };
 
-            const filteredContracts = contracts.filter(c => String(c.groupId).includes(searchTerm) || (c.groupName && c.groupName.includes(searchTerm)));
+            const filteredContracts = contracts
+                .filter(c => String(c.groupId).includes(searchTerm) || (c.groupName && c.groupName.includes(searchTerm)))
+                .sort((a, b) => {
+                    const tA = a.expireTime || 32503680000000;
+                    const tB = b.expireTime || 32503680000000;
+                    if (sortOrder === 'asc') return tA - tB;
+                    return tB - tA;
+                });
 
             return (
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'800px'}}>
                         <div className="modal-header">
                             <h3>配置: {bot.name}</h3>
-                            <button className="nav-btn" onClick={onClose}>✕</button>
+                            <button className="nav-btn" onClick={onClose}><Icons.X /></button>
                         </div>
                         <div className="modal-body" style={{display:'flex', gap:'2rem', flexDirection:'column'}}>
                             <div style={{display:'flex', gap:'1.5rem', alignItems:'center', background:'rgba(255,255,255,0.03)', padding:'1rem', borderRadius:'var(--radius-md)', flexWrap:'wrap'}}>
                                 <div style={{position:'relative', margin:'0 auto'}}>
-                                    <div className="bot-avatar" style={{width:'80px', height:'80px', fontSize:'2.5rem'}} onClick={() => fileInputRef.current.click()}>
-                                        {avatar && (avatar.startsWith('http') || avatar.startsWith('/')) ? <img src={avatar} /> : (avatar || '👾')}
+                                    <div className="bot-avatar" style={{width:'80px', height:'80px', fontSize:'2.5rem'}} onClick={handleSetQQAvatar}>
+                                        {avatar && (avatar.startsWith('http') || avatar.startsWith('/')) ? <img src={avatar} /> : <div style={{width: '40px', height:'40px', color:'var(--text-muted)'}}><Icons.Robot /></div>}
                                     </div>
                                     <input type="file" ref={fileInputRef} style={{display:'none'}} accept="image/*" onChange={handleUploadAvatar} />
-                                    <div style={{fontSize:'0.7rem', textAlign:'center', marginTop:'0.5rem', color:'var(--primary)', cursor:'pointer'}} onClick={() => fileInputRef.current.click()}>更换</div>
+                                    <div style={{display:'flex', gap:'8px', justifyContent:'center', marginTop:'0.5rem'}}>
+                                        <span style={{fontSize:'0.7rem', color:'var(--primary)', cursor:'pointer'}} onClick={() => fileInputRef.current.click()}>上传</span>
+                                        <span style={{fontSize:'0.7rem', color:'var(--primary)', cursor:'pointer'}} onClick={handleSetQQAvatar}>QQ头像</span>
+                                    </div>
                                 </div>
                                 <div style={{flex:1, minWidth:'200px'}}>
                                     <div className="form-group">
@@ -564,9 +626,19 @@
                             <div>
                                 <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem', flexWrap:'wrap', gap:'0.5rem'}}>
                                     <h4 style={{margin:0}}>租户 ({contracts.length})</h4>
-                                    <div style={{display:'flex', gap:'0.5rem', alignItems:'center'}}>
-                                        {bot.isOnline && <button className="btn btn-sm btn-secondary" onClick={() => setShowGhostScan(true)}>👻 扫描幽灵群</button>}
-                                        <input type="text" className="form-control" style={{padding:'0.4rem', width:'120px', fontSize:'0.9rem'}} placeholder="🔍 搜索" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
+                                    <div style={{display:'flex', gap:'0.5rem', alignItems:'center', flexWrap:'wrap'}}>
+                                        {bot.isOnline && <button className="btn btn-sm btn-secondary" onClick={() => setShowGhostScan(true)} style={{display:'flex',gap:'4px',alignItems:'center'}}><Icons.Ghost /> 扫描幽灵群</button>}
+                                        <div style={{position:'relative'}}>
+                                            <select className="form-control" style={{padding:'0.4rem 2rem 0.4rem 0.5rem', width:'auto', fontSize:'0.9rem', height:'34px', appearance:'none'}} value={sortOrder} onChange={e => setSortOrder(e.target.value)}>
+                                                <option value="asc">到期: 近➜远</option>
+                                                <option value="desc">到期: 远➜近</option>
+                                            </select>
+                                            <div style={{position:'absolute', right:'8px', top:'8px', pointerEvents:'none', width:'16px'}}><Icons.Sort /></div>
+                                        </div>
+                                        <div className="input-with-icon" style={{width:'140px'}}>
+                                            <Icons.Search />
+                                            <input type="text" className="form-control" style={{padding:'0.4rem 0.4rem 0.4rem 36px', fontSize:'0.9rem'}} placeholder="搜索" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
+                                        </div>
                                         <button className="btn btn-sm btn-primary" onClick={() => setEditingContract({})}>+ 授权</button>
                                     </div>
                                 </div>
@@ -587,7 +659,7 @@
                                                             <div style={{fontWeight:'600', display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap'}}>
                                                                 {c.groupName || c.groupId}
                                                                 {c.leftGroup && <span className="tag-left">已退群</span>}
-                                                                {isMissing && <span className="tag-missing">⚠️ 不在群</span>}
+                                                                {isMissing && <span className="tag-missing"><Icons.Alert /> 不在群</span>}
                                                             </div>
                                                             <div style={{fontSize:'0.85rem', color:'var(--text-secondary)', marginTop:'2px'}}>
                                                                 {c.groupId} · {isExpired ? <span style={{color:'var(--danger)'}}>过期</span> : <span style={{color:'var(--success)'}}>{daysLeft} 天</span>}
@@ -636,14 +708,17 @@
             return (
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'500px'}}>
-                        <div className="modal-header"><h3>发送消息</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                        <div className="modal-header"><h3>发送消息</h3><button className="nav-btn" onClick={onClose}><Icons.X /></button></div>
                         <div className="modal-body">
                             <div className="form-group">
                                 <label className="stat-label">群号</label>
                                 <input className="form-control" type="number" value={groupId} onChange={e => setGroupId(e.target.value)} placeholder="ID" />
                             </div>
                             <div style={{marginTop:'1rem', marginBottom:'1.5rem'}}>
-                                <input className="form-control" style={{fontSize:'0.85rem', padding:'0.5rem', marginBottom:'0.5rem'}} placeholder="🔍 搜索" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                <div className="input-with-icon" style={{marginBottom:'0.5rem'}}>
+                                    <Icons.Search />
+                                    <input className="form-control" style={{fontSize:'0.85rem'}} placeholder="搜索" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                </div>
                                 <div style={{maxHeight:'150px', overflowY:'auto', background:'rgba(0,0,0,0.2)', borderRadius:'var(--radius-sm)', border:'1px solid rgba(255,255,255,0.1)'}}>
                                     {filteredGroups.map(c => (
                                         <div key={c.id} style={{padding:'8px', borderBottom:'1px solid rgba(255,255,255,0.05)', cursor:'pointer'}} onClick={() => setGroupId(c.groupId)}>{c.groupName || c.groupId}</div>
@@ -696,7 +771,10 @@
             return (
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'600px'}}>
-                        <div className="modal-header"><h3>♻️ 回收站</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                        <div className="modal-header">
+                            <h3 style={{gap:'0.5rem'}}><Icons.Recycle /> 回收站</h3>
+                            <button className="nav-btn" onClick={onClose}><Icons.X /></button>
+                        </div>
                         <div style={{display:'flex', borderBottom:'1px solid rgba(255,255,255,0.1)', padding:'0 1rem'}}>
                             <div style={{padding:'1rem', cursor:'pointer', borderBottom: tab==='bots'?'2px solid var(--primary)':'none', color: tab==='bots'?'var(--primary)':'var(--text-secondary)'}} onClick={()=>setTab('bots')}>已删除实例 ({data.bots.length})</div>
                             <div style={{padding:'1rem', cursor:'pointer', borderBottom: tab==='contracts'?'2px solid var(--primary)':'none', color: tab==='contracts'?'var(--primary)':'var(--text-secondary)'}} onClick={()=>setTab('contracts')}>已删除授权 ({data.contracts.length})</div>
@@ -826,11 +904,14 @@
             return (
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'500px'}}>
-                        <div className="modal-header"><h3>系统设置</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                        <div className="modal-header">
+                            <h3><Icons.Settings /> 系统设置</h3>
+                            <button className="nav-btn" onClick={onClose}><Icons.X /></button>
+                        </div>
                         <div style={{display:'flex', borderBottom:'1px solid rgba(255,255,255,0.1)', padding:'0 1rem', overflowX:'auto'}}>
-                            {['basic', 'notification', 'quit', 'backup', 'security'].map(t => (
+                            {['basic', 'interaction', 'notification', 'quit', 'backup', 'security'].map(t => (
                                 <div key={t} style={{padding:'1rem', cursor:'pointer', color: tab===t?'var(--primary)':'var(--text-secondary)', borderBottom: tab===t?'2px solid var(--primary)':'none', whiteSpace:'nowrap'}} onClick={() => setTab(t)}>
-                                    {{basic:'基础', notification:'通知与交互', quit:'退群', backup:'备份与恢复', security:'安全'}[t]}
+                                    {{basic:'基础', interaction:'交互指令', notification:'通知模板', quit:'退群策略', backup:'备份恢复', security:'安全'}[t]}
                                 </div>
                             ))}
                         </div>
@@ -846,11 +927,11 @@
                                     <div className="section-divider">背景图</div>
                                     <div style={{display:'flex', gap:'0.5rem'}}>
                                         <input className="form-control" value={config.uiTheme.backgroundImage || ''} onChange={e => setConfig({...config, uiTheme: {...config.uiTheme, backgroundImage: e.target.value}})} placeholder="URL" />
-                                        <label className="btn btn-secondary" style={{marginBottom:0}}>上传<input type="file" style={{display:'none'}} onChange={uploadBg} /></label>
+                                        <label className="btn btn-secondary" style={{marginBottom:0, gap:'6px'}}><Icons.Upload /> 上传<input type="file" style={{display:'none'}} onChange={uploadBg} /></label>
                                     </div>
                                 </>
                             )}
-                            {tab === 'notification' && (
+                            {tab === 'interaction' && (
                                 <>
                                     <div className="section-divider">指令配置</div>
                                     <div style={{display:'flex', gap:'1rem'}}>
@@ -880,9 +961,14 @@
                                             <button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('quit')}>退群</button>
                                         </div>
                                     </div>
-                                    <div className="section-divider">通知内容</div>
+                                </>
+                            )}
+                            {tab === 'notification' && (
+                                <>
+                                    <div className="section-divider">通知模板</div>
                                     <div className="form-group"><label className="stat-label">预警内容</label><textarea className="form-control" value={config.warningMessage} onChange={e => setConfig({...config, warningMessage: e.target.value})} /></div>
                                     <div className="form-group"><label className="stat-label">到期内容</label><textarea className="form-control" value={config.defaultNotifyMessage} onChange={e => setConfig({...config, defaultNotifyMessage: e.target.value})} /></div>
+                                    <div className="form-group"><label className="stat-label">续费内容</label><textarea className="form-control" value={config.renewalMessage} onChange={e => setConfig({...config, renewalMessage: e.target.value})} /></div>
                                 </>
                             )}
                             {tab === 'quit' && (
@@ -902,7 +988,7 @@
                                     <div className="form-group"><label className="stat-label">保留天数</label><input type="number" className="form-control" value={config.backupRetentionDays} onChange={e => setConfig({...config, backupRetentionDays: parseInt(e.target.value)})} /></div>
                                     <div style={{display:'flex', gap:'0.5rem', marginTop:'0.5rem'}}>
                                         <button className="btn btn-primary" onClick={triggerBackup}>立即备份</button>
-                                        <label className="btn btn-secondary" style={{marginBottom:0}}>📤 导入并恢复<input type="file" style={{display:'none'}} onChange={restoreBackup} accept=".json" /></label>
+                                        <label className="btn btn-secondary" style={{marginBottom:0, display:'flex', alignItems:'center', gap:'6px'}}><Icons.Upload /> 导入并恢复<input type="file" style={{display:'none'}} onChange={restoreBackup} accept=".json" /></label>
                                     </div>
                                     <div className="section-divider">备份列表</div>
                                     <div style={{maxHeight:'200px', overflowY:'auto'}}>
@@ -913,7 +999,7 @@
                                                     <div>{b.name}</div>
                                                     <div style={{fontSize:'0.7rem', color:'var(--text-secondary)'}}>{new Date(b.created).toLocaleString()} · {b.size}</div>
                                                 </div>
-                                                <button className="btn btn-sm btn-secondary" onClick={() => downloadBackup(b.name)}>⬇️</button>
+                                                <button className="btn btn-sm btn-secondary" onClick={() => downloadBackup(b.name)}><Icons.Download /></button>
                                             </div>
                                         ))}
                                     </div>
@@ -943,11 +1029,11 @@
             useEffect(() => { fetch(`${apiHost}/api/logs`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setLogs); }, []);
             return (
                 <div className="modal-overlay" onClick={onClose}>
-                    <div className="modal-content" onClick={e => e.stopPropagation()}>
-                        <div className="modal-header"><h3>日志</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'600px'}}>
+                        <div className="modal-header"><h3><Icons.FileText style={{display:'inline',width:'20px', marginRight:'5px'}} /> 日志</h3><button className="nav-btn" onClick={onClose}><Icons.X /></button></div>
                         <div className="modal-body log-list" style={{maxHeight:'60vh', overflowY:'auto'}}>
                             {logs.map(log => (
-                                <div key={log.id} className="log-item">
+                                <div key={log.id} className="log-item" style={{borderBottom:'1px solid rgba(255,255,255,0.05)', padding:'8px 0'}}>
                                     <div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>{new Date(log.time).toLocaleString()}</div>
                                     <div style={{fontWeight:500}}>{log.action}</div>
                                     <div style={{color:'var(--text-secondary)', wordBreak:'break-all', fontSize:'0.9rem'}}>{log.details}</div>
@@ -964,8 +1050,8 @@
             useEffect(() => { fetch(`${apiHost}/api/admin/login-history`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setHistory); }, []);
             return (
                 <div className="modal-overlay" onClick={onClose}>
-                    <div className="modal-content" onClick={e => e.stopPropagation()}>
-                        <div className="modal-header"><h3>登录历史</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'700px'}}>
+                        <div className="modal-header"><h3><Icons.History style={{display:'inline',width:'20px', marginRight:'5px'}}/> 登录历史</h3><button className="nav-btn" onClick={onClose}><Icons.X /></button></div>
                         <div className="modal-body" style={{maxHeight:'60vh', overflowY:'auto'}}>
                             <div style={{overflowX:'auto'}}>
                                 <table className="history-table">
@@ -974,7 +1060,7 @@
                                         {history.map(h => (
                                             <tr key={h.id}>
                                                 <td>{new Date(h.time).toLocaleString()}</td><td>{h.username}</td><td>{h.ip}</td><td>{h.location}</td>
-                                                <td><span style={{color: h.status ? 'var(--success)' : 'var(--danger)'}}>{h.status ? '成功' : '失败'}</span></td>
+                                                <td><span style={{display:'flex', alignItems:'center', gap:'4px', color: h.status ? 'var(--success)' : 'var(--danger)'}}>{h.status ? <Icons.Check /> : <Icons.X />} {h.status ? '成功' : '失败'}</span></td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -989,17 +1075,28 @@
         const AddBotModal = ({ token, apiHost, onClose, onSuccess }) => {
             const [id, setId] = useState('');
             const [name, setName] = useState('');
+            const [avatar, setAvatar] = useState('');
+
             const handleAdd = async () => {
                 if (!id) return;
-                await fetch(`${apiHost}/api/bot/create`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ id, name: name || `Bot ${id}` }) });
+                await fetch(`${apiHost}/api/bot/create`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ id, name: name || `Bot ${id}`, avatar }) });
                 onSuccess(); onClose();
             };
+            
             return (
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'400px'}}>
-                        <div className="modal-header"><h3>新增实例</h3><button className="nav-btn" onClick={onClose}>✕</button></div>
+                        <div className="modal-header"><h3><Icons.Plus /> 新增实例</h3><button className="nav-btn" onClick={onClose}><Icons.X /></button></div>
                         <div className="modal-body">
-                            <div className="form-group"><label className="stat-label">Bot ID</label><input type="number" className="form-control" value={id} onChange={e => setId(e.target.value)} placeholder="QQ号" /></div>
+                            <div style={{display:'flex', justifyContent:'center', marginBottom:'1rem'}}>
+                                <div className="bot-avatar" style={{width:'80px', height:'80px'}}>
+                                    {avatar ? <img src={avatar} /> : <img src="https://q1.qlogo.cn/g?b=qq&nk=10000&s=100" alt="Default QQ" />}
+                                </div>
+                            </div>
+                            <div className="form-group"><label className="stat-label">Bot ID (QQ号)</label><input type="number" className="form-control" value={id} onChange={e => {
+                                setId(e.target.value);
+                                if(e.target.value) setAvatar(`https://q1.qlogo.cn/g?b=qq&nk=${e.target.value}&s=100`);
+                            }} placeholder="123456" /></div>
                             <div className="form-group" style={{marginTop:'1rem'}}><label className="stat-label">备注</label><input className="form-control" value={name} onChange={e => setName(e.target.value)} placeholder="名称" /></div>
                         </div>
                         <div className="modal-actions"><button className="btn btn-primary" onClick={handleAdd}>创建</button></div>
