@@ -1,4 +1,5 @@
 
+
 :root {
     /* Dynamic Theme Variables - Will be overridden by JS */
     --primary: #007AFF; /* Apple System Blue */
@@ -320,13 +321,13 @@ input:checked + .slider:before { transform: translateX(20px); }
 /* --- Toast Notification --- */
 .toast-container {
     position: fixed;
-    top: 20px;
+    top: 24px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 2000;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     pointer-events: none;
 }
 
@@ -335,17 +336,22 @@ input:checked + .slider:before { transform: translateX(20px); }
     backdrop-filter: blur(20px);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: white;
-    padding: 10px 20px;
+    padding: 6px 16px;
     border-radius: 99px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     animation: toastIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-    font-size: 0.95rem;
-    min-width: 200px;
+    font-size: 0.85rem;
+    min-width: auto;
     justify-content: center;
     pointer-events: auto;
+}
+
+.toast-item svg {
+    width: 16px;
+    height: 16px;
 }
 
 .toast-success svg { color: var(--success); }
