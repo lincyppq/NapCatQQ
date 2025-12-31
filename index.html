@@ -216,7 +216,7 @@
                 } catch (err) { console.error(err); } finally { setLoading(false); }
             };
 
-            useEffect(() => { fetchBots(); const interval = setInterval(() => { fetchBots(); }, 5000); return () => clearInterval(interval); }, [token]);
+            useEffect(() => { fetchBots(); const interval = setInterval(() => { fetchBots(); }, 1000); return () => clearInterval(interval); }, [token]);
 
             return (
                 <div className="dashboard">
