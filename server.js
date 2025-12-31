@@ -311,7 +311,13 @@ const isBotOnline = (bot) => {
 };
 const markBotSeen = (botId) => {
     if (!botsDB[botId]) return;
+    const wasOnline = botsDB[botId].status === 'online';
     botsDB[botId].lastSeen = Date.now();
+    if (!wasOnline) {
+        botsDB[botId].status = 'online';
+        writeLog('BOT', '机器人上线', `账号 ${botId} 心跳确认`);
+        saveDB();
+    }
 };
 
 // --- WebSocket ---
@@ -326,23 +332,23 @@ wss.on('connection', (ws, req) => {
     if (selfId) {
         console.log(`NapCat Connected: ${selfId}`);
         activeConnections.set(String(selfId), ws);
-        writeLog('BOT', '机器人上线', `账号 ${selfId} 已连接`);
         ws.isAlive = true;
-        ws.on('pong', () => { ws.isAlive = true; });
+        ws.on('pong', () => {
+            ws.isAlive = true;
+            markBotSeen(String(selfId));
+        });
         
         if (!botsDB[selfId]) {
-            botsDB[selfId] = normalizeBot({ id: selfId, name: `Bot ${selfId}`, status: 'online', contracts: [] });
+            botsDB[selfId] = normalizeBot({ id: selfId, name: `Bot ${selfId}`, status: 'offline', contracts: [] });
             saveDB();
         } else {
             if (botsDB[selfId].deleted) {
                 botsDB[selfId].deleted = false;
                 delete botsDB[selfId].deletedAt;
             }
-            botsDB[selfId].status = 'online';
             botsDB[selfId] = normalizeBot(botsDB[selfId]);
             saveDB();
         }
-        markBotSeen(String(selfId));
         
         ws.on('close', () => {
             activeConnections.delete(String(selfId));
