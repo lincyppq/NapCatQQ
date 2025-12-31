@@ -29,6 +29,8 @@ const BACKUPS_DIR = path.join(__dirname, 'backups');
 const WS_TOKEN = process.env.WS_TOKEN || '';
 const MAX_IMAGE_BYTES = process.env.MAX_IMAGE_BYTES ? parseInt(process.env.MAX_IMAGE_BYTES, 10) : 5 * 1024 * 1024;
 const MAX_BACKUP_BYTES = process.env.MAX_BACKUP_BYTES ? parseInt(process.env.MAX_BACKUP_BYTES, 10) : 2 * 1024 * 1024;
+const WS_HEARTBEAT_INTERVAL_MS = process.env.WS_HEARTBEAT_INTERVAL_MS ? parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) : 30000;
+const WS_OFFLINE_AFTER_MS = process.env.WS_OFFLINE_AFTER_MS ? parseInt(process.env.WS_OFFLINE_AFTER_MS, 10) : 65000;
 const TRUST_PROXY = process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true';
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
@@ -152,6 +154,7 @@ const normalizeBot = (bot) => {
         id,
         name: bot.name || `Bot ${id}`,
         avatar: normalizeBotAvatar(id, bot.avatar),
+        lastSeen: typeof bot.lastSeen === 'number' ? bot.lastSeen : 0,
         contracts: Array.isArray(bot.contracts) ? bot.contracts.map(normalizeContract).filter(Boolean) : []
     };
 };
@@ -300,6 +303,16 @@ const saveDB = () => queueWrite(DB_FILE, botsDB);
 
 const activeConnections = new Map(); 
 const pendingRequests = new Map();
+const isBotOnline = (bot) => {
+    const ws = activeConnections.get(String(bot.id));
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    const lastSeen = typeof bot.lastSeen === 'number' ? bot.lastSeen : 0;
+    return Date.now() - lastSeen <= WS_OFFLINE_AFTER_MS;
+};
+const markBotSeen = (botId) => {
+    if (!botsDB[botId]) return;
+    botsDB[botId].lastSeen = Date.now();
+};
 
 // --- WebSocket ---
 wss.on('connection', (ws, req) => {
@@ -314,13 +327,22 @@ wss.on('connection', (ws, req) => {
         console.log(`NapCat Connected: ${selfId}`);
         activeConnections.set(String(selfId), ws);
         writeLog('BOT', '机器人上线', `账号 ${selfId} 已连接`);
+        ws.isAlive = true;
+        ws.on('pong', () => { ws.isAlive = true; });
         
         if (!botsDB[selfId]) {
             botsDB[selfId] = normalizeBot({ id: selfId, name: `Bot ${selfId}`, status: 'online', contracts: [] });
             saveDB();
         } else {
+            if (botsDB[selfId].deleted) {
+                botsDB[selfId].deleted = false;
+                delete botsDB[selfId].deletedAt;
+            }
             botsDB[selfId].status = 'online';
+            botsDB[selfId] = normalizeBot(botsDB[selfId]);
+            saveDB();
         }
+        markBotSeen(String(selfId));
         
         ws.on('close', () => {
             activeConnections.delete(String(selfId));
@@ -330,6 +352,7 @@ wss.on('connection', (ws, req) => {
 
         ws.on('message', (message) => {
             try {
+                markBotSeen(String(selfId));
                 const msg = JSON.parse(message);
                 if (msg.echo && pendingRequests.has(msg.echo)) {
                     const { resolve } = pendingRequests.get(msg.echo);
@@ -374,6 +397,28 @@ wss.on('connection', (ws, req) => {
         });
     }
 });
+
+setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) {
+            ws.terminate();
+            return;
+        }
+        ws.isAlive = false;
+        try { ws.ping(); } catch (e) {}
+    });
+    const now = Date.now();
+    Object.keys(botsDB).forEach(id => {
+        if (!botsDB[id]) return;
+        const ws = activeConnections.get(String(id));
+        const lastSeen = botsDB[id].lastSeen || 0;
+        const shouldBeOnline = ws && ws.readyState === WebSocket.OPEN && (now - lastSeen <= WS_OFFLINE_AFTER_MS);
+        if (!shouldBeOnline && botsDB[id].status !== 'offline') {
+            botsDB[id].status = 'offline';
+            writeLog('BOT', '机器人离线', `账号 ${id} 心跳超时`);
+        }
+    });
+}, WS_HEARTBEAT_INTERVAL_MS);
 
 const authenticateToken = (req, res, next) => {
     const token = req.headers['authorization']?.split(' ')[1];
@@ -593,7 +638,7 @@ app.get('/api/bots', authenticateToken, (req, res) => {
         return {
             ...normalized,
             contracts: (normalized.contracts || []).filter(c => !c.deleted),
-            isOnline: activeConnections.has(String(normalized.id))
+            isOnline: isBotOnline(normalized)
         };
     });
     res.json(list);
