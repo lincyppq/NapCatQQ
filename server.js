@@ -358,6 +358,7 @@ wss.on('connection', (ws, req) => {
 
         ws.on('message', (message) => {
             try {
+                ws.isAlive = true;
                 markBotSeen(String(selfId));
                 const msg = JSON.parse(message);
                 if (msg.echo && pendingRequests.has(msg.echo)) {
