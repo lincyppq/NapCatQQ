@@ -3,6 +3,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NapCat 管理面板</title>
     <link rel="stylesheet" href="index.css">
@@ -92,11 +93,31 @@
         const useToast = () => useContext(ToastContext);
         const useConfirm = () => useContext(ConfirmContext);
 
+        const AppContent = ({ token, mustChangePassword, configLoaded, apiHost, handleLogin, handleLogout, applyTheme }) => {
+            const toast = useToast();
+            if (!token) return <div className="view-transition" key="login"><LoginScreen onLogin={handleLogin} apiHost={apiHost} /></div>;
+            if (!configLoaded) return <div className="view-transition" key="loading" style={{textAlign:'center', color:'rgba(255,255,255,0.6)', fontSize:'1.1rem', marginTop:'35vh'}}>Loading...</div>;
+            if (mustChangePassword) return <div className="view-transition" key="force"><AdminSettingsModal token={token} apiHost={apiHost} onClose={() => {}} onLogout={handleLogout} applyTheme={applyTheme} toast={toast} force={true} initialTab="security" /></div>;
+            return <div className="view-transition" key="dash"><Dashboard token={token} apiHost={apiHost} onLogout={handleLogout} applyTheme={applyTheme} /></div>;
+        };
+
         const App = () => {
-            const [token, setToken] = useState(localStorage.getItem('token'));
+            const [token, setToken] = useState(sessionStorage.getItem('token'));
+            const [mustChangePassword, setMustChangePassword] = useState(false);
+            const [configLoaded, setConfigLoaded] = useState(false);
             const apiHost = ''; 
-            const handleLogin = (newToken) => { setToken(newToken); localStorage.setItem('token', newToken); };
-            const handleLogout = () => { setToken(null); localStorage.removeItem('token'); };
+            const handleLogin = (newToken, mustChange) => {
+                setToken(newToken);
+                sessionStorage.setItem('token', newToken);
+                setMustChangePassword(Boolean(mustChange));
+                setConfigLoaded(false);
+            };
+            const handleLogout = () => {
+                setToken(null);
+                sessionStorage.removeItem('token');
+                setMustChangePassword(false);
+                setConfigLoaded(false);
+            };
             const applyTheme = (theme) => {
                 const target = document.body; 
                 if (theme.primaryColor) target.style.setProperty('--primary', theme.primaryColor);
@@ -107,13 +128,21 @@
             useEffect(() => {
                 if (token) {
                     fetch(`${apiHost}/api/admin/config`, { headers: { 'Authorization': `Bearer ${token}` } })
-                        .then(r => r.json()).then(config => { if (config.uiTheme) applyTheme(config.uiTheme); }).catch(() => {});
+                        .then(r => r.json())
+                        .then(config => {
+                            if (config.uiTheme) applyTheme(config.uiTheme);
+                            setMustChangePassword(Boolean(config.mustChangePassword));
+                        })
+                        .catch(() => {})
+                        .finally(() => setConfigLoaded(true));
+                } else {
+                    setConfigLoaded(false);
                 }
             }, [token]);
             return (
                 <ToastProvider>
                     <ConfirmProvider>
-                        {token ? <div className="view-transition" key="dash"><Dashboard token={token} apiHost={apiHost} onLogout={handleLogout} applyTheme={applyTheme} /></div> : <div className="view-transition" key="login"><LoginScreen onLogin={handleLogin} apiHost={apiHost} /></div>}
+                        <AppContent token={token} mustChangePassword={mustChangePassword} configLoaded={configLoaded} apiHost={apiHost} handleLogin={handleLogin} handleLogout={handleLogout} applyTheme={applyTheme} />
                     </ConfirmProvider>
                 </ToastProvider>
             );
@@ -133,7 +162,7 @@
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ username, password })
                     });
-                    if (res.ok) { const data = await res.json(); onLogin(data.token); } 
+                    if (res.ok) { const data = await res.json(); onLogin(data.token, data.mustChangePassword); } 
                     else { setIsError(true); setTimeout(() => setIsError(false), 500); }
                 } catch (err) { setIsError(true); setTimeout(() => setIsError(false), 500); } 
                 finally { setLoading(false); }
@@ -219,16 +248,25 @@
             );
         };
 
+        const resolveAvatar = (botId, avatar) => {
+            if (!avatar) return `https://q1.qlogo.cn/g?b=qq&nk=${botId}&s=100`;
+            const value = String(avatar).trim();
+            if (!value) return `https://q1.qlogo.cn/g?b=qq&nk=${botId}&s=100`;
+            if (value.startsWith('http') || value.startsWith('/')) return value;
+            if (/^\d+$/.test(value)) return `https://q1.qlogo.cn/g?b=qq&nk=${value}&s=100`;
+            return `https://q1.qlogo.cn/g?b=qq&nk=${botId}&s=100`;
+        };
+
         const BotCard = ({ bot, onEdit, onMsg }) => {
             const activeContracts = bot.contracts?.filter(c => !c.expireTime || c.expireTime > Date.now()).length || 0;
-            const hasCustomAvatar = bot.avatar && (bot.avatar.startsWith('http') || bot.avatar.startsWith('/'));
+            const avatarUrl = resolveAvatar(bot.id, bot.avatar);
             return (
                 <div className="bot-card">
                     <div className={`status-badge ${bot.isOnline ? 'status-online' : 'status-offline'}`}><span className="status-dot"></span><span>{bot.isOnline ? 'Online' : 'Offline'}</span></div>
                     <div className="bot-info">
                         <div className="bot-avatar">
-                            {hasCustomAvatar ? <img src={bot.avatar} onError={(e)=>{e.target.style.display='none';e.target.nextSibling.style.display='block'}} /> : null}
-                            <div style={{display: hasCustomAvatar ? 'none' : 'block', width: '32px', height: '32px', color: 'var(--text-muted)'}}><Icons.Robot /></div>
+                            <img src={avatarUrl} onError={(e)=>{ const fallback = `https://q1.qlogo.cn/g?b=qq&nk=${bot.id}&s=100`; if (e.target.src !== fallback) e.target.src = fallback; else { e.target.style.display='none'; e.target.nextSibling.style.display='block'; } }} />
+                            <div style={{display: 'none', width: '32px', height: '32px', color: 'var(--text-muted)'}}><Icons.Robot /></div>
                         </div>
                         <div className="bot-details"><h3>{bot.name}</h3><div className="bot-id">{bot.id}</div></div>
                     </div>
@@ -270,7 +308,7 @@
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'700px'}}>
                         <div className="modal-header"><h3><Icons.History style={{display:'inline',width:'20px', marginRight:'5px'}}/> 登录历史</h3><button className="nav-btn" onClick={onClose}><Icons.X /></button></div>
-                        <div className="modal-body" style={{maxHeight:'60vh', overflowY:'auto'}}><div style={{overflowX:'auto'}}><table className="history-table"><thead><tr><th>时间</th><th>用户</th><th>IP</th><th>归属</th><th>状态</th></tr></thead><tbody>{history.map(h => (<tr key={h.id}><td>{new Date(h.time).toLocaleString()}</td><td>{h.username}</td><td>{h.ip}</td><td>{h.location}</td><td><span style={{display:'flex', alignItems:'center', gap:'4px', color: h.status ? 'var(--success)' : 'var(--danger)'}}>{h.status ? <Icons.Check /> : <Icons.X />} {h.status ? '成功' : '失败'}</span></td></tr>))}</tbody></table></div></div>
+                        <div className="modal-body" style={{maxHeight:'60vh', overflowY:'auto'}}><div style={{overflowX:'auto'}}><table className="history-table"><thead><tr><th>时间</th><th>用户</th><th>IP</th><th>归属</th><th>状态</th></tr></thead><tbody>{history.map(h => (<tr key={h.id}><td>{new Date(h.time).toLocaleString()}</td><td>{h.username}</td><td>{h.ip}</td><td>{h.location}</td><td><span style={{color: h.status ? 'var(--success)' : 'var(--danger)'}}>{h.status ? '成功' : '失败'}</span></td></tr>))}</tbody></table></div></div>
                     </div>
                 </div>
             );
@@ -414,6 +452,10 @@
             const [avatar, setAvatar] = useState(bot.avatar || '');
             const [contracts, setContracts] = useState(bot.contracts || []);
             const [editingContract, setEditingContract] = useState(null);
+            const [showTransfer, setShowTransfer] = useState(false);
+            const [transferContract, setTransferContract] = useState(null);
+            const [targetBotId, setTargetBotId] = useState('');
+            const [botOptions, setBotOptions] = useState([]);
             const [searchTerm, setSearchTerm] = useState('');
             const [sortOrder, setSortOrder] = useState('asc');
             const [realTimeGroups, setRealTimeGroups] = useState(new Set());
@@ -421,12 +463,33 @@
             const fileInputRef = useRef(null);
             const confirm = useConfirm();
             useEffect(() => { setContracts(bot.contracts || []); setName(bot.name); setAvatar(bot.avatar || ''); }, [bot]);
+            useEffect(() => {
+                fetch(`${apiHost}/api/bots`, { headers: { 'Authorization': `Bearer ${token}` } })
+                    .then(r => r.json())
+                    .then(list => setBotOptions(list.filter(b => String(b.id) !== String(bot.id))))
+                    .catch(() => {});
+            }, [bot.id]);
             useEffect(() => { if (bot.isOnline) fetch(`${apiHost}/api/bot/group-list`, { method: 'POST', headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`}, body: JSON.stringify({ botId: bot.id }) }).then(res => res.json()).then(data => { if (Array.isArray(data)) setRealTimeGroups(new Set(data.map(g => String(g.group_id)))); }).catch(err => console.error(err)); }, [bot.id, bot.isOnline]);
             const handleSaveInfo = async () => { await fetch(`${apiHost}/api/bot/update-info`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ id: bot.id, name, avatar }) }); toast.success('已更新'); onSuccess(); };
             const handleUploadAvatar = async (e) => { const file = e.target.files[0]; if (!file) return; const formData = new FormData(); formData.append('image', file); try { const res = await fetch(`${apiHost}/api/upload`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData }); const data = await res.json(); setAvatar(data.url); } catch (err) { toast.error('上传失败'); } };
-            const handleSetQQAvatar = () => { const id = prompt("输入QQ号获取头像:", bot.id); if(id) setAvatar(`https://q1.qlogo.cn/g?b=qq&nk=${id}&s=100`); };
+            const handleSetQQAvatar = () => { const id = prompt("输入QQ号获取头像:", bot.id); if(id) setAvatar(String(id)); };
             const handleSaveContract = async (cData) => { await fetch(`${apiHost}/api/bot/contract/save`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ botId: bot.id, ...cData }) }); onSuccess(); setEditingContract(null); toast.success('已保存'); };
             const handleDeleteContract = async (contractId) => { if (!await confirm('确认删除？(将移入回收站)')) return; await fetch(`${apiHost}/api/bot/contract/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ botId: bot.id, contractId }) }); onSuccess(); };
+            const openTransfer = (contract) => {
+                if (botOptions.length === 0) return toast.error('没有可转移的目标实例');
+                setTransferContract(contract);
+                setTargetBotId(String(botOptions[0].id));
+                setShowTransfer(true);
+            };
+            const handleTransfer = async () => {
+                if (!transferContract || !targetBotId) return;
+                if (!await confirm('确认转移该授权？')) return;
+                try {
+                    const res = await fetch(`${apiHost}/api/bot/contract/transfer`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ fromBotId: bot.id, toBotId: targetBotId, contractId: transferContract.id }) });
+                    if (res.ok) { toast.success('已转移'); setShowTransfer(false); setTransferContract(null); onSuccess(); }
+                    else toast.error('转移失败');
+                } catch (e) { toast.error('转移失败'); }
+            };
             const handleDeleteBot = async () => { if (!await confirm('确认删除此机器人实例？(将移入回收站)')) return; await fetch(`${apiHost}/api/bot/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ id: bot.id }) }); onClose(); onSuccess(); };
             const handleQuitGroup = async (groupId) => { if (!await confirm(`确定退出群 ${groupId}？`)) return; await fetch(`${apiHost}/api/bot/quit-group`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ botId: bot.id, groupId }) }); onSuccess(); };
             const filteredContracts = contracts.filter(c => String(c.groupId).includes(searchTerm) || (c.groupName && c.groupName.includes(searchTerm))).sort((a, b) => { const tA = a.expireTime || 32503680000000; const tB = b.expireTime || 32503680000000; if (sortOrder === 'asc') return tA - tB; return tB - tA; });
@@ -436,7 +499,7 @@
                         <div className="modal-header"><h3>配置: {bot.name}</h3><button className="nav-btn" onClick={onClose}><Icons.X /></button></div>
                         <div className="modal-body" style={{display:'flex', gap:'2rem', flexDirection:'column'}}>
                             <div style={{display:'flex', gap:'1.5rem', alignItems:'center', background:'rgba(255,255,255,0.03)', padding:'1rem', borderRadius:'var(--radius-md)', flexWrap:'wrap'}}>
-                                <div style={{position:'relative', margin:'0 auto'}}><div className="bot-avatar" style={{width:'80px', height:'80px', fontSize:'2.5rem'}} onClick={handleSetQQAvatar}>{avatar && (avatar.startsWith('http') || avatar.startsWith('/')) ? <img src={avatar} /> : <div style={{width: '40px', height:'40px', color:'var(--text-muted)'}}><Icons.Robot /></div>}</div><input type="file" ref={fileInputRef} style={{display:'none'}} accept="image/*" onChange={handleUploadAvatar} /><div style={{display:'flex', gap:'8px', justifyContent:'center', marginTop:'0.5rem'}}><span style={{fontSize:'0.7rem', color:'var(--primary)', cursor:'pointer'}} onClick={() => fileInputRef.current.click()}>上传</span><span style={{fontSize:'0.7rem', color:'var(--primary)', cursor:'pointer'}} onClick={handleSetQQAvatar}>QQ头像</span></div></div>
+                                <div style={{position:'relative', margin:'0 auto'}}><div className="bot-avatar" style={{width:'80px', height:'80px', fontSize:'2.5rem'}} onClick={handleSetQQAvatar}><img src={resolveAvatar(bot.id, avatar)} onError={(e)=>{ const fallback = `https://q1.qlogo.cn/g?b=qq&nk=${bot.id}&s=100`; if (e.target.src !== fallback) e.target.src = fallback; else { e.target.style.display='none'; e.target.nextSibling.style.display='block'; } }} /><div style={{display:'none', width: '40px', height:'40px', color:'var(--text-muted)'}}><Icons.Robot /></div></div><input type="file" ref={fileInputRef} style={{display:'none'}} accept="image/*" onChange={handleUploadAvatar} /><div style={{display:'flex', gap:'8px', justifyContent:'center', marginTop:'0.5rem'}}><span style={{fontSize:'0.7rem', color:'var(--primary)', cursor:'pointer'}} onClick={() => fileInputRef.current.click()}>上传</span><span style={{fontSize:'0.7rem', color:'var(--primary)', cursor:'pointer'}} onClick={handleSetQQAvatar}>QQ头像</span></div></div>
                                 <div style={{flex:1, minWidth:'200px'}}><div className="form-group"><label className="stat-label">名称</label><input className="form-control" value={name} onChange={e => setName(e.target.value)} /></div></div>
                                 <div style={{display:'flex', gap:'0.5rem'}}><button className="btn btn-primary" onClick={handleSaveInfo}>保存信息</button><button className="btn btn-danger" onClick={handleDeleteBot}>删除实例</button></div>
                             </div>
@@ -459,7 +522,7 @@
                                             return (
                                                 <div className="contract-item stagger-item" key={c.id}>
                                                     <div style={{display:'flex', alignItems:'center', gap:'1rem'}}><img className="group-avatar" src={`https://p.qlogo.cn/gh/${c.groupId}/${c.groupId}/100`} onError={e=>e.target.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'} /><div><div style={{fontWeight:'600', display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap'}}>{c.groupName || c.groupId}{c.leftGroup && <span className="tag-left">已退群</span>}{isMissing && <span className="tag-missing"><Icons.Alert /> 不在群</span>}</div><div style={{fontSize:'0.85rem', color:'var(--text-secondary)', marginTop:'2px'}}>{c.groupId} · {isExpired ? <span style={{color:'var(--danger)'}}>过期</span> : <span style={{color:'var(--success)'}}>{daysLeft} 天</span>}</div></div></div>
-                                                    <div style={{display:'flex', gap:'0.5rem'}}>{!c.leftGroup && bot.isOnline && isExpired && <button className="btn btn-sm btn-warning" onClick={() => handleQuitGroup(c.groupId)}>退群</button>}<button className="btn btn-sm btn-secondary" onClick={() => setEditingContract(c)}>编辑</button><button className="btn btn-sm btn-danger" onClick={() => handleDeleteContract(c.id)}>删除</button></div>
+                                                    <div style={{display:'flex', gap:'0.5rem'}}>{!c.leftGroup && bot.isOnline && isExpired && <button className="btn btn-sm btn-warning" onClick={() => handleQuitGroup(c.groupId)}>退群</button>}<button className="btn btn-sm btn-secondary" onClick={() => setEditingContract(c)}>编辑</button><button className="btn btn-sm btn-secondary" onClick={() => openTransfer(c)}>转移</button><button className="btn btn-sm btn-danger" onClick={() => handleDeleteContract(c.id)}>删除</button></div>
                                                 </div>
                                             );
                                         })}
@@ -469,6 +532,29 @@
                         </div>
                     </div>
                     {showGhostScan && <GhostScanModal bot={bot} token={token} apiHost={apiHost} onClose={() => setShowGhostScan(false)} toast={toast} />}
+                    {showTransfer && (
+                        <div className="modal-overlay" onClick={() => setShowTransfer(false)}>
+                            <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'520px'}}>
+                                <div className="modal-header"><h3>转移授权</h3><button className="nav-btn" onClick={() => setShowTransfer(false)}><Icons.X /></button></div>
+                                <div className="modal-body">
+                                    <div className="form-group"><label className="stat-label">目标实例</label></div>
+                                    <div style={{maxHeight:'220px', overflowY:'auto', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'var(--radius-sm)'}}>
+                                        {botOptions.map(b => (
+                                            <div key={b.id} className="contract-item" style={{cursor:'pointer', background: String(b.id) === String(targetBotId) ? 'rgba(0,122,255,0.15)' : 'transparent'}} onClick={() => setTargetBotId(String(b.id))}>
+                                                <div><div style={{fontWeight:600}}>{b.name}</div><div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>ID: {b.id}</div></div>
+                                                <div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>{String(b.id) === String(targetBotId) ? '已选择' : ''}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {transferContract && <div style={{marginTop:'0.75rem', color:'var(--text-secondary)'}}>当前授权：{transferContract.groupName || transferContract.groupId}</div>}
+                                </div>
+                                <div className="modal-actions">
+                                    <button className="btn btn-secondary" onClick={() => setShowTransfer(false)}>取消</button>
+                                    <button className="btn btn-primary" onClick={handleTransfer}>确认转移</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         };
@@ -520,9 +606,9 @@
             );
         };
 
-        const AdminSettingsModal = ({ token, apiHost, onClose, onLogout, applyTheme, toast }) => {
+        const AdminSettingsModal = ({ token, apiHost, onClose, onLogout, applyTheme, toast, force = false, initialTab = 'personalization' }) => {
             const [config, setConfig] = useState(null);
-            const [tab, setTab] = useState('personalization');
+            const [tab, setTab] = useState(initialTab);
             const [backups, setBackups] = useState([]);
             const [testGroup, setTestGroup] = useState('');
             const [saveStatus, setSaveStatus] = useState('保存');
@@ -531,10 +617,12 @@
 
             useEffect(() => {
                 fetch(`${apiHost}/api/admin/config`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setConfig).catch(() => {});
-                fetch(`${apiHost}/api/backups`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setBackups).catch(() => {});
+                if (!force) fetch(`${apiHost}/api/backups`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setBackups).catch(() => {});
             }, []);
 
             if (!config) return <div className="modal-overlay"><div className="modal-content" style={{maxWidth:'500px', padding:'2rem', textAlign:'center', color:'var(--text-secondary)'}}>Loading settings...</div></div>;
+
+            const tabs = force ? ['security'] : ['personalization', 'interaction', 'notification', 'strategy', 'backup', 'security'];
 
             const handleSave = async () => {
                 setSaveStatus('Saving...');
@@ -550,6 +638,21 @@
             };
 
             const handleBackup = async () => { await fetch(`${apiHost}/api/backup/now`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); toast.success('备份已创建'); fetch(`${apiHost}/api/backups`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setBackups); };
+            const handleDownload = async (name) => {
+                try {
+                    const res = await fetch(`${apiHost}/api/backup/${encodeURIComponent(name)}`, { headers: { 'Authorization': `Bearer ${token}` } });
+                    if (!res.ok) return toast.error('下载失败');
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = name;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                } catch (e) { toast.error('下载失败'); }
+            };
             
             const handleRestore = async (e) => {
                 const file = e.target.files[0]; if(!file) return;
@@ -564,11 +667,11 @@
             const colors = ['#007AFF', '#AF52DE', '#30D158', '#FF9500', '#FF3B30', '#00C7BE'];
 
             return (
-                <div className="modal-overlay" onClick={onClose}>
+                <div className="modal-overlay" onClick={force ? () => {} : onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'600px'}}>
-                        <div className="modal-header"><h3><Icons.Settings style={{marginRight:'8px'}} /> 系统设置</h3><button className="nav-btn" onClick={onClose}><Icons.X /></button></div>
+                        <div className="modal-header"><h3><Icons.Settings style={{marginRight:'8px'}} /> 系统设置</h3>{!force && <button className="nav-btn" onClick={onClose}><Icons.X /></button>}</div>
                         <div style={{display:'flex', borderBottom:'1px solid rgba(255,255,255,0.1)', padding:'0 1rem', overflowX:'auto'}}>
-                            {['personalization', 'interaction', 'notification', 'strategy', 'backup', 'security'].map(t => (
+                            {tabs.map(t => (
                                 <div key={t} style={{padding:'1rem', cursor:'pointer', color: tab===t?'var(--primary)':'var(--text-secondary)', borderBottom: tab===t?'2px solid var(--primary)':'none', whiteSpace:'nowrap'}} onClick={() => setTab(t)}>{
                                     {personalization:'个性化', interaction:'指令', notification:'通知模板', strategy:'自动退群', backup:'备份恢复', security:'安全'}[t]
                                 }</div>
@@ -612,22 +715,25 @@
                             {tab === 'backup' && (
                                 <div>
                                     <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem'}}><div className="form-group" style={{marginBottom:0}}><label className="stat-label">保留最近 (天)</label><input type="number" className="form-control" style={{width:'80px'}} value={config.backupRetentionDays ?? 7} onChange={e => setConfig({...config, backupRetentionDays: parseInt(e.target.value)})} /></div><div style={{display:'flex', gap:'0.5rem'}}><input type="file" id="restoreInput" style={{display:'none'}} onChange={handleRestore} accept=".json" /><button className="btn btn-secondary" onClick={() => document.getElementById('restoreInput').click()}><Icons.Upload /> 导入并恢复</button><button className="btn btn-primary" onClick={handleBackup}>立即备份</button></div></div>
-                                    <div style={{maxHeight:'200px', overflowY:'auto', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'var(--radius-sm)'}}>{backups.map(b => (<div key={b.name} style={{display:'flex', justifyContent:'space-between', padding:'0.8rem', borderBottom:'1px solid rgba(255,255,255,0.05)', alignItems:'center'}}><div><div>{b.name}</div><div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>{new Date(b.created).toLocaleString()} · {b.size}</div></div><a href={`${apiHost}/api/backup/${b.name}?token=${token}`} className="btn btn-sm btn-secondary"><Icons.Download /></a></div>))}</div>
+                                    <div style={{maxHeight:'200px', overflowY:'auto', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'var(--radius-sm)'}}>{backups.map(b => (<div key={b.name} style={{display:'flex', justifyContent:'space-between', padding:'0.8rem', borderBottom:'1px solid rgba(255,255,255,0.05)', alignItems:'center'}}><div><div>{b.name}</div><div style={{fontSize:'0.8rem', color:'var(--text-secondary)'}}>{new Date(b.created).toLocaleString()} · {b.size}</div></div><button className="btn btn-sm btn-secondary" onClick={() => handleDownload(b.name)}><Icons.Download /></button></div>))}</div>
                                 </div>
                             )}
                             {tab === 'security' && (
                                 <div>
+                                    {force && <div style={{padding:'0.75rem 1rem', background:'rgba(255,149,0,0.15)', border:'1px solid rgba(255,149,0,0.35)', borderRadius:'var(--radius-sm)', color:'var(--warning)', marginBottom:'1rem'}}>首次登录请修改管理员账号或密码。</div>}
                                     <div className="form-group"><label className="stat-label">新管理员账号</label><input className="form-control" placeholder="不修改请留空" onChange={e => setConfig({...config, newUsername: e.target.value})} /></div>
                                     <div className="form-group" style={{marginTop:'1rem'}}><label className="stat-label">新密码</label><input className="form-control" type="password" placeholder="不修改请留空" onChange={e => setConfig({...config, newPassword: e.target.value})} /></div>
                                     <button className="btn btn-warning" style={{marginTop:'1rem', width:'100%'}} onClick={async () => { if (config.newUsername || config.newPassword) { await fetch(`${apiHost}/api/admin/change-password`, { method:'POST', headers:{'Content-Type':'application/json', 'Authorization':`Bearer ${token}`}, body: JSON.stringify(config) }); onLogout(); } }}>修改并重新登录</button>
                                 </div>
                             )}
                         </div>
-                        <div className="modal-actions">
-                            <button className={`btn ${saveStatus === '保存' ? 'btn-primary' : 'btn-saved'}`} onClick={handleSave}>
-                                {saveStatus === '保存' ? '保存配置' : <><Icons.Check /> 已保存</>}
-                            </button>
-                        </div>
+                        {!force && (
+                            <div className="modal-actions">
+                                <button className={`btn ${saveStatus === '保存' ? 'btn-primary' : 'btn-saved'}`} onClick={handleSave}>
+                                    {saveStatus === '保存' ? '保存配置' : <><Icons.Check /> 已保存</>}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             );
