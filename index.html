@@ -51,6 +51,10 @@
                 setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
             };
             const value = useMemo(() => ({ success: (msg) => add(msg, 'success'), error: (msg) => add(msg, 'error') }), []);
+            useEffect(() => {
+                window.__toast = value;
+                return () => { if (window.__toast === value) delete window.__toast; };
+            }, [value]);
             return (
                 <ToastContext.Provider value={value}>
                     {children}
@@ -133,7 +137,7 @@
                             if (config.uiTheme) applyTheme(config.uiTheme);
                             setMustChangePassword(Boolean(config.mustChangePassword));
                         })
-                        .catch(() => {})
+                        .catch(() => { if (window.__toast) window.__toast.error('配置加载失败'); })
                         .finally(() => setConfigLoaded(true));
                 } else {
                     setConfigLoaded(false);
@@ -199,6 +203,7 @@
             const [showRecycleBin, setShowRecycleBin] = useState(false);
             const [showSearch, setShowSearch] = useState(false);
             const [wsUrl, setWsUrl] = useState('');
+            const fetchErrorRef = useRef(0);
             const toast = useToast();
 
             useEffect(() => {
@@ -213,7 +218,13 @@
                     const data = await res.json();
                     setBots(data);
                     setEditingBot(prev => { if (!prev) return null; return data.find(b => b.id === prev.id) || prev; });
-                } catch (err) { console.error(err); } finally { setLoading(false); }
+                } catch (err) {
+                    const now = Date.now();
+                    if (now - fetchErrorRef.current > 5000) {
+                        fetchErrorRef.current = now;
+                        toast.error('获取实例失败');
+                    }
+                } finally { setLoading(false); }
             };
 
             useEffect(() => { fetchBots(); const interval = setInterval(() => { fetchBots(); }, 1000); return () => clearInterval(interval); }, [token]);
@@ -282,7 +293,12 @@
 
         const LogViewerModal = ({ token, apiHost, onClose }) => {
             const [logs, setLogs] = useState([]);
-            useEffect(() => { fetch(`${apiHost}/api/logs`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setLogs); }, []);
+            useEffect(() => {
+                fetch(`${apiHost}/api/logs`, { headers: { 'Authorization': `Bearer ${token}` } })
+                    .then(r => r.json())
+                    .then(setLogs)
+                    .catch(() => { if (window.__toast) window.__toast.error('加载日志失败'); });
+            }, []);
             return (
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'600px'}}>
@@ -303,7 +319,12 @@
 
         const LoginHistoryModal = ({ token, apiHost, onClose }) => {
             const [history, setHistory] = useState([]);
-            useEffect(() => { fetch(`${apiHost}/api/admin/login-history`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setHistory); }, []);
+            useEffect(() => {
+                fetch(`${apiHost}/api/admin/login-history`, { headers: { 'Authorization': `Bearer ${token}` } })
+                    .then(r => r.json())
+                    .then(setHistory)
+                    .catch(() => { if (window.__toast) window.__toast.error('加载登录历史失败'); });
+            }, []);
             return (
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth:'700px'}}>
@@ -348,7 +369,7 @@
             useEffect(() => { if (groupId) updateGroupInfo(groupId); }, []);
             const updateGroupInfo = (gid) => {
                 if (!gid) return; setAvatarUrl(`https://p.qlogo.cn/gh/${gid}/${gid}/100`);
-                if (!groupName) fetch(`${apiHost}/api/bot/group-info`, { method: 'POST', headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`}, body: JSON.stringify({ botId, groupId: gid }) }).then(res => res.json()).then(data => { if (data.groupName) setGroupName(data.groupName); }).catch(() => {});
+                if (!groupName) fetch(`${apiHost}/api/bot/group-info`, { method: 'POST', headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`}, body: JSON.stringify({ botId, groupId: gid }) }).then(res => res.json()).then(data => { if (data.groupName) setGroupName(data.groupName); }).catch(() => { toast.error('获取群信息失败'); });
             };
             const handleSave = () => { if (!groupId) return toast.error('请输入群号'); onSave({ contractId: contract?.id, groupId, groupName, expireTime: expireTime ? new Date(expireTime).getTime() : null }); };
             const addTime = (days) => { const current = expireTime ? new Date(expireTime) : new Date(); current.setDate(current.getDate() + days); setExpireTime(toLocalISO(current.getTime())); };
@@ -467,9 +488,15 @@
                 fetch(`${apiHost}/api/bots`, { headers: { 'Authorization': `Bearer ${token}` } })
                     .then(r => r.json())
                     .then(list => setBotOptions(list.filter(b => String(b.id) !== String(bot.id))))
-                    .catch(() => {});
+                    .catch(() => { toast.error('获取实例列表失败'); });
             }, [bot.id]);
-            useEffect(() => { if (bot.isOnline) fetch(`${apiHost}/api/bot/group-list`, { method: 'POST', headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`}, body: JSON.stringify({ botId: bot.id }) }).then(res => res.json()).then(data => { if (Array.isArray(data)) setRealTimeGroups(new Set(data.map(g => String(g.group_id)))); }).catch(err => console.error(err)); }, [bot.id, bot.isOnline]);
+            useEffect(() => {
+                if (!bot.isOnline) return;
+                fetch(`${apiHost}/api/bot/group-list`, { method: 'POST', headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`}, body: JSON.stringify({ botId: bot.id }) })
+                    .then(res => res.json())
+                    .then(data => { if (Array.isArray(data)) setRealTimeGroups(new Set(data.map(g => String(g.group_id)))); })
+                    .catch(() => { toast.error('获取群列表失败'); });
+            }, [bot.id, bot.isOnline]);
             const handleSaveInfo = async () => { await fetch(`${apiHost}/api/bot/update-info`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ id: bot.id, name, avatar }) }); toast.success('已更新'); onSuccess(); };
             const handleUploadAvatar = async (e) => { const file = e.target.files[0]; if (!file) return; const formData = new FormData(); formData.append('image', file); try { const res = await fetch(`${apiHost}/api/upload`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData }); const data = await res.json(); setAvatar(data.url); } catch (err) { toast.error('上传失败'); } };
             const handleSetQQAvatar = () => { const id = prompt("输入QQ号获取头像:", bot.id); if(id) setAvatar(String(id)); };
@@ -616,8 +643,8 @@
             const fileInputRef = useRef(null);
 
             useEffect(() => {
-                fetch(`${apiHost}/api/admin/config`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setConfig).catch(() => {});
-                if (!force) fetch(`${apiHost}/api/backups`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setBackups).catch(() => {});
+                fetch(`${apiHost}/api/admin/config`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setConfig).catch(() => { toast.error('加载配置失败'); });
+                if (!force) fetch(`${apiHost}/api/backups`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setBackups).catch(() => { toast.error('加载备份列表失败'); });
             }, []);
 
             if (!config) return <div className="modal-overlay"><div className="modal-content" style={{maxWidth:'500px', padding:'2rem', textAlign:'center', color:'var(--text-secondary)'}}>Loading settings...</div></div>;
