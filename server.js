@@ -4,6 +4,8 @@ const http = require('http');
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
+const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const cron = require('node-cron');
@@ -15,14 +17,24 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 // --- Configuration ---
-const PORT = 54321;
-const JWT_SECRET = 'napcat-secret-key-change-this'; 
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 54321;
+const JWT_SECRET_FILE = path.join(__dirname, 'jwt_secret.txt');
+let JWT_SECRET = process.env.JWT_SECRET || '';
 const DB_FILE = path.join(__dirname, 'bots.json');
 const ADMIN_FILE = path.join(__dirname, 'admin.json');
 const AUDIT_FILE = path.join(__dirname, 'audit.json');
 const LOGIN_HISTORY_FILE = path.join(__dirname, 'login_history.json');
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const BACKUPS_DIR = path.join(__dirname, 'backups');
+const WS_TOKEN = process.env.WS_TOKEN || '';
+const MAX_IMAGE_BYTES = process.env.MAX_IMAGE_BYTES ? parseInt(process.env.MAX_IMAGE_BYTES, 10) : 5 * 1024 * 1024;
+const MAX_BACKUP_BYTES = process.env.MAX_BACKUP_BYTES ? parseInt(process.env.MAX_BACKUP_BYTES, 10) : 2 * 1024 * 1024;
+const TRUST_PROXY = process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true';
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+const DEFAULT_ALLOWED_ORIGINS = [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`];
 
 // --- Directory Initialization ---
 [UPLOADS_DIR, BACKUPS_DIR].forEach(dir => {
@@ -37,12 +49,30 @@ const storage = multer.diskStorage({
         cb(null, Date.now() + ext);
     }
 });
-const upload = multer({ storage: storage });
+const uploadImage = multer({
+    storage: storage,
+    limits: { fileSize: MAX_IMAGE_BYTES },
+    fileFilter: (req, file, cb) => {
+        const allowed = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+        if (allowed.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Invalid image type'));
+    }
+});
+const uploadBackup = multer({
+    storage: storage,
+    limits: { fileSize: MAX_BACKUP_BYTES },
+    fileFilter: (req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const allowed = ['application/json', 'text/plain'];
+        if (ext === '.json' || allowed.includes(file.mimetype)) return cb(null, true);
+        cb(new Error('Invalid backup file'));
+    }
+});
 
 // --- Initial Data ---
 let adminConfig = {
     username: 'admin',
-    password: 'admin123',
+    passwordHash: '',
     defaultNotifyMessage: '[系统通知] 本群机器人服务已到期，请联系管理员续费。',
     warningDays: 3,
     warningMessage: '[温馨提醒] 本群机器人服务即将到期，请及时续费以免影响使用。',
@@ -76,6 +106,7 @@ if (fs.existsSync(ADMIN_FILE)) {
         delete adminConfig.blacklist;
     } catch (e) { console.error("Failed to read admin config"); }
 } else {
+    adminConfig.passwordHash = bcrypt.hashSync('admin123', 10);
     fs.writeFileSync(ADMIN_FILE, JSON.stringify(adminConfig, null, 2));
 }
 
@@ -87,7 +118,68 @@ if (fs.existsSync(LOGIN_HISTORY_FILE)) {
     try { loginHistory = JSON.parse(fs.readFileSync(LOGIN_HISTORY_FILE, 'utf8')); } catch (e) {}
 }
 
-const saveAdminConfig = () => fs.writeFileSync(ADMIN_FILE, JSON.stringify(adminConfig, null, 2));
+const fileWriteQueues = new Map();
+const genId = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+const defaultBotAvatar = (id) => `https://q1.qlogo.cn/g?b=qq&nk=${id}&s=100`;
+const normalizeBotAvatar = (id, avatar) => {
+    const value = String(avatar || '').trim();
+    if (!value) return defaultBotAvatar(id);
+    if (value.startsWith('http') || value.startsWith('/')) return value;
+    if (/^\d+$/.test(value)) return defaultBotAvatar(value);
+    return value;
+};
+const normalizeContract = (contract) => {
+    if (!contract) return null;
+    const groupId = contract.groupId !== undefined ? String(contract.groupId) : '';
+    return {
+        ...contract,
+        id: contract.id || genId(),
+        groupId,
+        groupName: contract.groupName || (groupId ? `群${groupId}` : ''),
+        expireTime: typeof contract.expireTime === 'number' ? contract.expireTime : null,
+        deleted: Boolean(contract.deleted),
+        leftGroup: Boolean(contract.leftGroup),
+        notified: Boolean(contract.notified),
+        preNotified: Boolean(contract.preNotified)
+    };
+};
+const normalizeBot = (bot) => {
+    if (!bot) return null;
+    const id = bot.id !== undefined ? String(bot.id) : '';
+    if (!id) return null;
+    return {
+        ...bot,
+        id,
+        name: bot.name || `Bot ${id}`,
+        avatar: normalizeBotAvatar(id, bot.avatar),
+        contracts: Array.isArray(bot.contracts) ? bot.contracts.map(normalizeContract).filter(Boolean) : []
+    };
+};
+const normalizeBotsDB = (db) => {
+    const next = {};
+    Object.keys(db || {}).forEach(key => {
+        const normalized = normalizeBot(db[key]);
+        if (normalized) next[normalized.id] = normalized;
+    });
+    return next;
+};
+const queueWrite = (filePath, data) => {
+    const payload = JSON.stringify(data, null, 2);
+    const prev = fileWriteQueues.get(filePath) || Promise.resolve();
+    const next = prev
+        .catch(() => {})
+        .then(() => fs.promises.writeFile(filePath, payload))
+        .catch(() => {});
+    fileWriteQueues.set(filePath, next);
+};
+
+const saveAdminConfig = () => queueWrite(ADMIN_FILE, adminConfig);
+
+if (adminConfig.password && !adminConfig.passwordHash) {
+    adminConfig.passwordHash = bcrypt.hashSync(adminConfig.password, 10);
+    delete adminConfig.password;
+    saveAdminConfig();
+}
 
 // --- Security: Rate Limiting ---
 const loginAttempts = new Map(); 
@@ -119,7 +211,7 @@ const recordLoginAttempt = (ip, success) => {
 // --- Logging System ---
 const writeLog = (type, action, details) => {
     const entry = {
-        id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
+        id: genId(),
         time: Date.now(),
         type, 
         action,
@@ -127,7 +219,7 @@ const writeLog = (type, action, details) => {
     };
     logs.unshift(entry);
     if (logs.length > 500) logs = logs.slice(0, 500);
-    fs.writeFile(AUDIT_FILE, JSON.stringify(logs, null, 2), () => {});
+    queueWrite(AUDIT_FILE, logs);
 };
 
 // --- Login History ---
@@ -143,7 +235,7 @@ const getIpLocation = async (ip) => {
 const recordLogin = async (username, ip, success) => {
     const cleanIp = ip.replace(/^::ffff:/, '');
     const entry = {
-        id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
+        id: genId(),
         time: Date.now(),
         username,
         ip: cleanIp,
@@ -152,11 +244,11 @@ const recordLogin = async (username, ip, success) => {
     };
     loginHistory.unshift(entry);
     if (loginHistory.length > 200) loginHistory = loginHistory.slice(0, 200);
-    fs.writeFile(LOGIN_HISTORY_FILE, JSON.stringify(loginHistory, null, 2), () => {});
+    queueWrite(LOGIN_HISTORY_FILE, loginHistory);
     try {
         const location = await getIpLocation(cleanIp);
         entry.location = location;
-        fs.writeFile(LOGIN_HISTORY_FILE, JSON.stringify(loginHistory, null, 2), () => {});
+        queueWrite(LOGIN_HISTORY_FILE, loginHistory);
     } catch (e) {}
 };
 
@@ -181,8 +273,16 @@ const performBackup = () => {
 };
 
 // --- Middleware ---
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', TRUST_PROXY);
+app.use(cors({
+    origin: (origin, cb) => {
+        if (!origin) return cb(null, true);
+        const allowList = ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : DEFAULT_ALLOWED_ORIGINS;
+        if (allowList.includes(origin)) return cb(null, true);
+        return cb(new Error('Not allowed by CORS'));
+    }
+}));
+app.use(express.json({ limit: '1mb' }));
 
 // --- Routes ---
 app.get('/lincyppq', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
@@ -195,13 +295,19 @@ let botsDB = {};
 if (fs.existsSync(DB_FILE)) {
     try { botsDB = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
 }
-const saveDB = () => fs.writeFileSync(DB_FILE, JSON.stringify(botsDB, null, 2));
+botsDB = normalizeBotsDB(botsDB);
+const saveDB = () => queueWrite(DB_FILE, botsDB);
 
 const activeConnections = new Map(); 
 const pendingRequests = new Map();
 
 // --- WebSocket ---
 wss.on('connection', (ws, req) => {
+    const wsToken = req.headers['x-ws-token'];
+    if (WS_TOKEN && wsToken !== WS_TOKEN) {
+        ws.close(1008, 'Unauthorized');
+        return;
+    }
     const selfId = req.headers['x-self-id'] || req.headers['x-client-role'];
     
     if (selfId) {
@@ -210,7 +316,7 @@ wss.on('connection', (ws, req) => {
         writeLog('BOT', '机器人上线', `账号 ${selfId} 已连接`);
         
         if (!botsDB[selfId]) {
-            botsDB[selfId] = { id: selfId, name: `Bot ${selfId}`, status: 'online', contracts: [] };
+            botsDB[selfId] = normalizeBot({ id: selfId, name: `Bot ${selfId}`, status: 'online', contracts: [] });
             saveDB();
         } else {
             botsDB[selfId].status = 'online';
@@ -275,24 +381,107 @@ const authenticateToken = (req, res, next) => {
     jwt.verify(token, JWT_SECRET, (err, user) => {
         if (err) return res.sendStatus(403);
         req.user = user;
+        if (isDefaultPassword()) {
+            const allowPaths = new Set(['/api/admin/change-password', '/api/admin/config']);
+            if (!allowPaths.has(req.path)) {
+                return res.status(403).json({ error: 'Password change required', mustChangePassword: true });
+            }
+        }
         next();
     });
+};
+
+const isDefaultPassword = () => {
+    if (!adminConfig.passwordHash) return false;
+    return bcrypt.compareSync('admin123', adminConfig.passwordHash);
+};
+
+const ensureJwtSecret = (cb) => {
+    if (JWT_SECRET) {
+        if (!fs.existsSync(JWT_SECRET_FILE)) {
+            try { fs.writeFileSync(JWT_SECRET_FILE, JWT_SECRET); } catch (e) {}
+        }
+        return cb();
+    }
+    if (fs.existsSync(JWT_SECRET_FILE)) {
+        try {
+            const saved = fs.readFileSync(JWT_SECRET_FILE, 'utf8').trim();
+            if (saved) {
+                JWT_SECRET = saved;
+                return cb();
+            }
+        } catch (e) {}
+    }
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const ask = () => {
+        rl.question('输入秘钥: ', (answer) => {
+            const trimmed = String(answer || '').trim();
+            if (!trimmed) {
+                console.log('JWT_SECRET is required.');
+                return ask();
+            }
+            JWT_SECRET = trimmed;
+            try { fs.writeFileSync(JWT_SECRET_FILE, JWT_SECRET); } catch (e) {}
+            rl.close();
+            cb();
+        });
+    };
+    ask();
+};
+
+const sanitizeAdminUpdate = (input = {}) => {
+    const allowedKeys = new Set([
+        'defaultNotifyMessage',
+        'warningDays',
+        'warningMessage',
+        'renewalMessage',
+        'backupRetentionDays',
+        'autoQuit',
+        'quitWaitHours',
+        'quitMessage',
+        'cmdPrefix',
+        'cmdQuery',
+        'cmdRenew',
+        'uiTheme'
+    ]);
+    const out = {};
+    Object.keys(input).forEach(key => {
+        if (!allowedKeys.has(key)) return;
+        if (key === 'uiTheme' && input.uiTheme && typeof input.uiTheme === 'object') {
+            out.uiTheme = {
+                primaryColor: String(input.uiTheme.primaryColor || adminConfig.uiTheme?.primaryColor || '#007AFF'),
+                backgroundImage: String(input.uiTheme.backgroundImage || ''),
+                overlayOpacity: typeof input.uiTheme.overlayOpacity === 'number' ? input.uiTheme.overlayOpacity : adminConfig.uiTheme?.overlayOpacity ?? 0.4
+            };
+            return;
+        }
+        out[key] = input[key];
+    });
+    if (typeof out.warningDays !== 'undefined') out.warningDays = parseInt(out.warningDays, 10) || 0;
+    if (typeof out.backupRetentionDays !== 'undefined') out.backupRetentionDays = parseInt(out.backupRetentionDays, 10) || 0;
+    if (typeof out.quitWaitHours !== 'undefined') out.quitWaitHours = parseInt(out.quitWaitHours, 10) || 0;
+    return out;
 };
 
 // --- API ---
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
-    const cleanIp = ip.replace(/^::ffff:/, '');
+    const ip = req.ip || '';
+    const cleanIp = String(ip).replace(/^::ffff:/, '');
 
     if (!checkRateLimit(cleanIp)) return res.status(429).json({ error: '尝试次数过多，IP 已暂时锁定 15 分钟' });
     
-    if (username === adminConfig.username && password === adminConfig.password) {
+    const hasHash = Boolean(adminConfig.passwordHash);
+    const passwordMatch = hasHash
+        ? bcrypt.compareSync(password || '', adminConfig.passwordHash)
+        : (password === adminConfig.password);
+
+    if (username === adminConfig.username && passwordMatch) {
         recordLoginAttempt(cleanIp, true);
         const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '24h' });
         writeLog('ACCESS', '登录成功', `用户 ${username} 登录成功`);
         recordLogin(username, ip, true);
-        res.json({ token });
+        res.json({ token, mustChangePassword: isDefaultPassword() });
     } else {
         recordLoginAttempt(cleanIp, false);
         writeLog('ACCESS', '登录失败', `IP: ${cleanIp} 尝试登录 ${username} 失败`);
@@ -305,8 +494,8 @@ app.get('/api/admin/login-history', authenticateToken, (req, res) => res.json(lo
 
 app.post('/api/admin/change-password', authenticateToken, (req, res) => {
     const { newUsername, newPassword } = req.body;
-    adminConfig.username = newUsername || adminConfig.username;
-    adminConfig.password = newPassword || adminConfig.password;
+    if (newUsername) adminConfig.username = String(newUsername);
+    if (newPassword) adminConfig.passwordHash = bcrypt.hashSync(String(newPassword), 10);
     saveAdminConfig();
     writeLog('ACCESS', '修改密码', '管理员账号/密码已修改');
     res.json({ success: true });
@@ -314,6 +503,7 @@ app.post('/api/admin/change-password', authenticateToken, (req, res) => {
 
 app.get('/api/admin/config', authenticateToken, (req, res) => {
     res.json({
+        mustChangePassword: isDefaultPassword(),
         defaultNotifyMessage: adminConfig.defaultNotifyMessage,
         warningDays: adminConfig.warningDays,
         warningMessage: adminConfig.warningMessage,
@@ -330,7 +520,7 @@ app.get('/api/admin/config', authenticateToken, (req, res) => {
 });
 
 app.post('/api/admin/config', authenticateToken, (req, res) => {
-    Object.assign(adminConfig, req.body);
+    Object.assign(adminConfig, sanitizeAdminUpdate(req.body));
     saveAdminConfig();
     writeLog('OPERATION', '更新配置', '全局系统配置已更新');
     res.json({ success: true });
@@ -365,23 +555,29 @@ app.get('/api/backups', authenticateToken, (req, res) => {
     } catch(e) { res.json([]); }
 });
 app.get('/api/backup/:filename', authenticateToken, (req, res) => {
-    const filePath = path.join(BACKUPS_DIR, req.params.filename);
-    if (fs.existsSync(filePath)) res.download(filePath);
+    const safeName = path.basename(req.params.filename);
+    if (safeName !== req.params.filename) return res.status(400).send('Invalid filename');
+    const resolved = path.resolve(BACKUPS_DIR, safeName);
+    const root = path.resolve(BACKUPS_DIR);
+    if (!resolved.startsWith(root + path.sep)) return res.status(400).send('Invalid path');
+    if (fs.existsSync(resolved)) res.download(resolved);
     else res.status(404).send('Not found');
 });
 
-app.post('/api/backup/restore', authenticateToken, upload.single('file'), (req, res) => {
+app.post('/api/backup/restore', authenticateToken, uploadBackup.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     try {
         const filePath = req.file.path;
         const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
         let restoredType = 'Unknown';
         if (data.username && data.uiTheme) {
-             Object.assign(adminConfig, data);
+             if (data.username) adminConfig.username = String(data.username);
+             if (data.passwordHash) adminConfig.passwordHash = String(data.passwordHash);
+             Object.assign(adminConfig, sanitizeAdminUpdate(data));
              saveAdminConfig();
              restoredType = '系统配置';
         } else if (typeof data === 'object') {
-            botsDB = data;
+            botsDB = normalizeBotsDB(data);
             saveDB();
             restoredType = '机器人数据';
         }
@@ -392,36 +588,43 @@ app.post('/api/backup/restore', authenticateToken, upload.single('file'), (req, 
 });
 
 app.get('/api/bots', authenticateToken, (req, res) => {
-    const list = Object.values(botsDB).filter(bot => !bot.deleted).map(bot => ({
-        ...bot,
-        contracts: (bot.contracts || []).filter(c => !c.deleted),
-        isOnline: activeConnections.has(String(bot.id))
-    }));
+    const list = Object.values(botsDB).filter(bot => !bot.deleted).map(bot => {
+        const normalized = normalizeBot(bot);
+        return {
+            ...normalized,
+            contracts: (normalized.contracts || []).filter(c => !c.deleted),
+            isOnline: activeConnections.has(String(normalized.id))
+        };
+    });
     res.json(list);
 });
 
 app.post('/api/bot/create', authenticateToken, (req, res) => {
     const { id, name, avatar } = req.body;
-    if (botsDB[id]) {
-        if (botsDB[id].deleted) {
-            botsDB[id].deleted = false;
-            botsDB[id].name = name || botsDB[id].name;
+    const botId = id !== undefined ? String(id) : '';
+    if (!botId) return res.status(400).json({ error: 'Invalid ID' });
+    if (botsDB[botId]) {
+        if (botsDB[botId].deleted) {
+            botsDB[botId].deleted = false;
+            botsDB[botId].name = name || botsDB[botId].name;
+            botsDB[botId].avatar = normalizeBotAvatar(botId, botsDB[botId].avatar);
             saveDB();
             return res.json({ success: true });
         }
         return res.status(400).json({ error: 'Exists' });
     }
-    botsDB[id] = { id: String(id), name: name || `Bot ${id}`, status: 'offline', contracts: [], avatar };
+    botsDB[botId] = normalizeBot({ id: botId, name: name || `Bot ${botId}`, status: 'offline', contracts: [], avatar });
     saveDB();
-    writeLog('OPERATION', '添加实例', `添加实例: ${id}`);
+    writeLog('OPERATION', '添加实例', `添加实例: ${botId}`);
     res.json({ success: true });
 });
 
 app.post('/api/bot/update-info', authenticateToken, (req, res) => {
     const { id, name, avatar } = req.body;
-    if (botsDB[id]) {
-        botsDB[id].name = name;
-        if (avatar !== undefined) botsDB[id].avatar = avatar;
+    const botId = id !== undefined ? String(id) : '';
+    if (botsDB[botId]) {
+        botsDB[botId].name = name;
+        if (avatar !== undefined) botsDB[botId].avatar = normalizeBotAvatar(botId, avatar);
         saveDB();
         res.json({ success: true });
     } else res.status(404).json({ error: 'Not Found' });
@@ -501,14 +704,14 @@ app.post('/api/bot/contract/save', authenticateToken, (req, res) => {
     let contract = botsDB[botId].contracts.find(c => c.id === contractId);
     if (contract) {
         if (expireTime > (contract.expireTime || 0)) { contract.notified = false; contract.preNotified = false; contract.leftGroup = false; }
-        contract.groupId = groupId;
-        contract.expireTime = expireTime;
+        contract.groupId = String(groupId);
+        contract.expireTime = typeof expireTime === 'number' ? expireTime : null;
         if (groupName) contract.groupName = groupName;
         writeLog('OPERATION', '更新授权', `群: ${groupId}`);
     } else {
         botsDB[botId].contracts.push({
-            id: Date.now().toString(36) + Math.random().toString(36).substr(2),
-            groupId, groupName: groupName || `群 ${groupId}`, expireTime, notified: false, preNotified: false, leftGroup: false
+            id: genId(),
+            groupId: String(groupId), groupName: groupName || `群 ${groupId}`, expireTime: typeof expireTime === 'number' ? expireTime : null, notified: false, preNotified: false, leftGroup: false
         });
         writeLog('OPERATION', '新增授权', `群: ${groupId}`);
     }
@@ -527,6 +730,38 @@ app.post('/api/bot/contract/delete', authenticateToken, (req, res) => {
             res.json({ success: true });
         } else res.status(404).json({ error: 'Contract Not Found' });
     } else res.status(404).json({ error: 'Bot Not Found' });
+});
+
+app.post('/api/bot/contract/transfer', authenticateToken, (req, res) => {
+    const { fromBotId, toBotId, contractId } = req.body;
+    if (!fromBotId || !toBotId || !contractId) return res.status(400).json({ error: 'Missing fields' });
+    if (String(fromBotId) === String(toBotId)) return res.status(400).json({ error: 'Same bot' });
+    const fromBot = botsDB[fromBotId];
+    const toBot = botsDB[toBotId];
+    if (!fromBot || fromBot.deleted) return res.status(404).json({ error: 'Source bot not found' });
+    if (!toBot || toBot.deleted) return res.status(404).json({ error: 'Target bot not found' });
+    const idx = (fromBot.contracts || []).findIndex(c => c.id === contractId && !c.deleted);
+    if (idx === -1) return res.status(404).json({ error: 'Contract not found' });
+
+    const contract = fromBot.contracts[idx];
+    fromBot.contracts.splice(idx, 1);
+    if (!toBot.contracts) toBot.contracts = [];
+
+    const newContract = normalizeContract({
+        ...contract,
+        leftGroup: false,
+        preNotified: false,
+        notified: false
+    });
+    delete newContract.deleted;
+    delete newContract.deletedAt;
+    if (toBot.contracts.some(c => c.id === newContract.id)) {
+        newContract.id = genId();
+    }
+    toBot.contracts.push(newContract);
+    saveDB();
+    writeLog('OPERATION', '转移授权', `群 ${contract.groupId} 从 ${fromBotId} 转移到 ${toBotId}`);
+    res.json({ success: true, id: newContract.id });
 });
 
 app.post('/api/bot/quit-group', authenticateToken, (req, res) => {
@@ -561,9 +796,9 @@ app.post('/api/bot/send', authenticateToken, (req, res) => {
     } else res.status(500).json({ error: 'Bot Offline' });
 });
 
-app.post('/api/upload', authenticateToken, upload.single('image'), (req, res) => {
+app.post('/api/upload', authenticateToken, uploadImage.single('image'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file' });
-    res.json({ path: path.resolve(req.file.path), url: `/uploads/${req.file.filename}` });
+    res.json({ url: `/uploads/${req.file.filename}` });
 });
 
 app.get('/api/recycle-bin', authenticateToken, (req, res) => {
@@ -594,6 +829,14 @@ app.post('/api/recycle-bin/purge', authenticateToken, (req, res) => {
         botsDB[botId].contracts = botsDB[botId].contracts.filter(c => c.id !== id);
         saveDB(); res.json({ success: true });
     } else res.status(400).json({error:'Invalid'});
+});
+
+app.use((err, req, res, next) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError || (err.message && err.message.startsWith('Invalid'))) {
+        return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: 'Server error' });
 });
 
 cron.schedule('* * * * *', () => {
@@ -655,6 +898,8 @@ cron.schedule('0 3 * * *', () => {
     if (dbChanged) saveDB();
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`NapCat Admin Panel: http://localhost:${PORT}/lincyppq`);
+ensureJwtSecret(() => {
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`NapCat Admin Panel: http://localhost:${PORT}/lincyppq`);
+    });
 });
