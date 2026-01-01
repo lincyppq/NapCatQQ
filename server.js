@@ -566,16 +566,19 @@ app.get('/api/admin/login-history', authenticateToken, (req, res) => res.json(lo
 
 app.post('/api/admin/change-password', authenticateToken, (req, res) => {
     const { newUsername, newPassword } = req.body;
+    const finalUsername = newUsername ? String(newUsername) : adminConfig.username;
     if (newUsername) adminConfig.username = String(newUsername);
     if (newPassword) adminConfig.passwordHash = bcrypt.hashSync(String(newPassword), 10);
     saveAdminConfig();
     writeLog('ACCESS', '修改密码', '管理员账号/密码已修改');
-    res.json({ success: true });
+    const newToken = jwt.sign({ username: finalUsername }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ success: true, token: newToken });
 });
 
 app.get('/api/admin/config', authenticateToken, (req, res) => {
     res.json({
         mustChangePassword: isDefaultPassword(),
+        username: adminConfig.username,
         defaultNotifyMessage: adminConfig.defaultNotifyMessage,
         warningDays: adminConfig.warningDays,
         warningMessage: adminConfig.warningMessage,
@@ -975,3 +978,4 @@ ensureJwtSecret(() => {
         console.log(`NapCat Admin Panel: http://localhost:${PORT}/lincyppq`);
     });
 });
+
