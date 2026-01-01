@@ -80,7 +80,7 @@ let adminConfig = {
     renewalMessage: '请联系管理员进行续费。\n支持微信/支付宝。',
     backupRetentionDays: 7,
     // Auto Quit Strategy
-    autoQuit: false, 
+    autoQuit: false,
     quitWaitHours: 24,
     quitMessage: '[服务结束] 由于服务到期未续费，机器人将自动退出本群。感谢使用，江湖再见。',
     // Custom Commands
@@ -112,11 +112,11 @@ if (fs.existsSync(ADMIN_FILE)) {
 }
 
 if (fs.existsSync(AUDIT_FILE)) {
-    try { logs = JSON.parse(fs.readFileSync(AUDIT_FILE, 'utf8')); } catch (e) {}
+    try { logs = JSON.parse(fs.readFileSync(AUDIT_FILE, 'utf8')); } catch (e) { }
 }
 
 if (fs.existsSync(LOGIN_HISTORY_FILE)) {
-    try { loginHistory = JSON.parse(fs.readFileSync(LOGIN_HISTORY_FILE, 'utf8')); } catch (e) {}
+    try { loginHistory = JSON.parse(fs.readFileSync(LOGIN_HISTORY_FILE, 'utf8')); } catch (e) { }
 }
 
 const fileWriteQueues = new Map();
@@ -169,9 +169,9 @@ const queueWrite = (filePath, data) => {
     const payload = JSON.stringify(data, null, 2);
     const prev = fileWriteQueues.get(filePath) || Promise.resolve();
     const next = prev
-        .catch(() => {})
+        .catch(() => { })
         .then(() => fs.promises.writeFile(filePath, payload))
-        .catch(() => {});
+        .catch(() => { });
     fileWriteQueues.set(filePath, next);
 };
 
@@ -184,7 +184,7 @@ if (adminConfig.password && !adminConfig.passwordHash) {
 }
 
 // --- Security: Rate Limiting ---
-const loginAttempts = new Map(); 
+const loginAttempts = new Map();
 
 const checkRateLimit = (ip) => {
     const now = Date.now();
@@ -203,7 +203,7 @@ const recordLoginAttempt = (ip, success) => {
         if (record.blockedUntil && now > record.blockedUntil) record = { count: 0, blockedUntil: 0 };
         record.count += 1;
         if (record.count >= 5) {
-            record.blockedUntil = now + 15 * 60 * 1000; 
+            record.blockedUntil = now + 15 * 60 * 1000;
             console.warn(`IP ${ip} blocked due to too many failed login attempts.`);
         }
         loginAttempts.set(ip, record);
@@ -215,7 +215,7 @@ const writeLog = (type, action, details) => {
     const entry = {
         id: genId(),
         time: Date.now(),
-        type, 
+        type,
         action,
         details
     };
@@ -251,7 +251,7 @@ const recordLogin = async (username, ip, success) => {
         const location = await getIpLocation(cleanIp);
         entry.location = location;
         queueWrite(LOGIN_HISTORY_FILE, loginHistory);
-    } catch (e) {}
+    } catch (e) { }
 };
 
 // --- Backup System ---
@@ -262,7 +262,7 @@ const performBackup = () => {
         if (fs.existsSync(DB_FILE)) fs.copyFileSync(DB_FILE, `${backupPath}-bots.json`);
         if (fs.existsSync(ADMIN_FILE)) fs.copyFileSync(ADMIN_FILE, `${backupPath}-admin.json`);
         writeLog('SYSTEM', '创建备份', `自动备份成功: ${timestamp}`);
-        
+
         const retentionMs = (adminConfig.backupRetentionDays || 7) * 24 * 60 * 60 * 1000;
         const files = fs.readdirSync(BACKUPS_DIR);
         const now = Date.now();
@@ -316,12 +316,12 @@ app.get('/', (req, res) => res.status(403).send('Access Denied.'));
 // --- DB Loading ---
 let botsDB = {};
 if (fs.existsSync(DB_FILE)) {
-    try { botsDB = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
+    try { botsDB = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) { }
 }
 botsDB = normalizeBotsDB(botsDB);
 const saveDB = () => queueWrite(DB_FILE, botsDB);
 
-const activeConnections = new Map(); 
+const activeConnections = new Map();
 const pendingRequests = new Map();
 const isBotOnline = (bot) => {
     const ws = activeConnections.get(String(bot.id));
@@ -348,7 +348,7 @@ wss.on('connection', (ws, req) => {
         return;
     }
     const selfId = req.headers['x-self-id'] || req.headers['x-client-role'];
-    
+
     if (selfId) {
         console.log(`NapCat Connected: ${selfId}`);
         activeConnections.set(String(selfId), ws);
@@ -357,7 +357,7 @@ wss.on('connection', (ws, req) => {
             ws.isAlive = true;
             markBotSeen(String(selfId));
         });
-        
+
         if (!botsDB[selfId]) {
             botsDB[selfId] = normalizeBot({ id: selfId, name: `Bot ${selfId}`, status: 'offline', contracts: [] });
             saveDB();
@@ -369,7 +369,7 @@ wss.on('connection', (ws, req) => {
             botsDB[selfId] = normalizeBot(botsDB[selfId]);
             saveDB();
         }
-        
+
         ws.on('close', () => {
             activeConnections.delete(String(selfId));
             if (botsDB[selfId]) botsDB[selfId].status = 'offline';
@@ -385,7 +385,7 @@ wss.on('connection', (ws, req) => {
                     const { resolve } = pendingRequests.get(msg.echo);
                     resolve(msg);
                     pendingRequests.delete(msg.echo);
-                    return; 
+                    return;
                 }
 
                 if (msg.post_type === 'message' && (msg.message_type === 'group' || (msg.message && msg.message_type === 'group'))) {
@@ -394,10 +394,10 @@ wss.on('connection', (ws, req) => {
                     const prefix = adminConfig.cmdPrefix || 'xa';
                     const queryCmd = prefix + (adminConfig.cmdQuery || '查询到期');
                     const renewCmd = prefix + (adminConfig.cmdRenew || '续费');
-                    
+
                     if (rawText.startsWith(queryCmd)) {
                         const botData = botsDB[selfId];
-                        if (botData.deleted) return; 
+                        if (botData.deleted) return;
                         const contract = botData?.contracts?.find(c => String(c.groupId) === String(groupId) && !c.deleted);
                         let replyText = "";
                         if (!contract) replyText = "本群暂无授权记录或不在管理列表中。";
@@ -420,7 +420,7 @@ wss.on('connection', (ws, req) => {
                         writeLog('BOT', '自动回复(续费)', `回复群 ${groupId}: 续费指引`);
                     }
                 }
-            } catch(e) {}
+            } catch (e) { }
         });
     }
 });
@@ -432,7 +432,7 @@ setInterval(() => {
             return;
         }
         ws.isAlive = false;
-        try { ws.ping(); } catch (e) {}
+        try { ws.ping(); } catch (e) { }
     });
     const now = Date.now();
     Object.keys(botsDB).forEach(id => {
@@ -471,7 +471,7 @@ const isDefaultPassword = () => {
 const ensureJwtSecret = (cb) => {
     if (JWT_SECRET) {
         if (!fs.existsSync(JWT_SECRET_FILE)) {
-            try { fs.writeFileSync(JWT_SECRET_FILE, JWT_SECRET); } catch (e) {}
+            try { fs.writeFileSync(JWT_SECRET_FILE, JWT_SECRET); } catch (e) { }
         }
         return cb();
     }
@@ -482,7 +482,7 @@ const ensureJwtSecret = (cb) => {
                 JWT_SECRET = saved;
                 return cb();
             }
-        } catch (e) {}
+        } catch (e) { }
     }
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const ask = () => {
@@ -493,7 +493,7 @@ const ensureJwtSecret = (cb) => {
                 return ask();
             }
             JWT_SECRET = trimmed;
-            try { fs.writeFileSync(JWT_SECRET_FILE, JWT_SECRET); } catch (e) {}
+            try { fs.writeFileSync(JWT_SECRET_FILE, JWT_SECRET); } catch (e) { }
             rl.close();
             cb();
         });
@@ -542,7 +542,7 @@ app.post('/api/login', (req, res) => {
     const cleanIp = String(ip).replace(/^::ffff:/, '');
 
     if (!checkRateLimit(cleanIp)) return res.status(429).json({ error: '尝试次数过多，IP 已暂时锁定 15 分钟' });
-    
+
     const hasHash = Boolean(adminConfig.passwordHash);
     const passwordMatch = hasHash
         ? bcrypt.compareSync(password || '', adminConfig.passwordHash)
@@ -602,7 +602,7 @@ app.post('/api/admin/config', authenticateToken, (req, res) => {
 });
 
 app.post('/api/admin/test-msg', authenticateToken, (req, res) => {
-    const { targetGroup, msgType } = req.body; 
+    const { targetGroup, msgType } = req.body;
     let message = '';
     if (msgType === 'renewal') message = adminConfig.renewalMessage;
     else if (msgType === 'expire') message = adminConfig.defaultNotifyMessage;
@@ -627,7 +627,7 @@ app.get('/api/backups', authenticateToken, (req, res) => {
             return { name: file, size: (stats.size / 1024).toFixed(2) + ' KB', created: stats.mtime };
         }).sort((a, b) => b.created - a.created);
         res.json(files);
-    } catch(e) { res.json([]); }
+    } catch (e) { res.json([]); }
 });
 app.get('/api/backup/:filename', authenticateToken, (req, res) => {
     const safeName = path.basename(req.params.filename);
@@ -646,11 +646,11 @@ app.post('/api/backup/restore', authenticateToken, uploadBackup.single('file'), 
         const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
         let restoredType = 'Unknown';
         if (data.username && data.uiTheme) {
-             if (data.username) adminConfig.username = String(data.username);
-             if (data.passwordHash) adminConfig.passwordHash = String(data.passwordHash);
-             Object.assign(adminConfig, sanitizeAdminUpdate(data));
-             saveAdminConfig();
-             restoredType = '系统配置';
+            if (data.username) adminConfig.username = String(data.username);
+            if (data.passwordHash) adminConfig.passwordHash = data.passwordHash;
+            Object.assign(adminConfig, sanitizeAdminUpdate(data));
+            saveAdminConfig();
+            restoredType = '系统配置';
         } else if (typeof data === 'object') {
             botsDB = normalizeBotsDB(data);
             saveDB();
@@ -711,7 +711,7 @@ app.post('/api/bot/group-info', authenticateToken, async (req, res) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return res.status(500).json({ error: 'Bot Offline' });
     const echo = Date.now().toString(36) + Math.random().toString(36).substr(2);
     const responsePromise = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => { pendingRequests.delete(echo); reject(new Error('Timeout')); }, 5000); 
+        const timeout = setTimeout(() => { pendingRequests.delete(echo); reject(new Error('Timeout')); }, 5000);
         pendingRequests.set(echo, { resolve: (data) => { clearTimeout(timeout); resolve(data); }, reject });
     });
     ws.send(JSON.stringify({ action: 'get_group_info', params: { group_id: parseInt(groupId), no_cache: true }, echo }));
@@ -727,7 +727,7 @@ app.post('/api/bot/ghost-scan', authenticateToken, async (req, res) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return res.status(500).json({ error: 'Bot Offline' });
     const echo = Date.now().toString(36) + Math.random().toString(36).substr(2);
     const responsePromise = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => { pendingRequests.delete(echo); reject(new Error('Timeout')); }, 5000); 
+        const timeout = setTimeout(() => { pendingRequests.delete(echo); reject(new Error('Timeout')); }, 5000);
         pendingRequests.set(echo, { resolve: (data) => { clearTimeout(timeout); resolve(data); }, reject });
     });
     ws.send(JSON.stringify({ action: 'get_group_list', echo }));
@@ -763,7 +763,7 @@ app.post('/api/bot/group-list', authenticateToken, async (req, res) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return res.status(500).json({ error: 'Bot Offline' });
     const echo = Date.now().toString(36) + Math.random().toString(36).substr(2);
     const responsePromise = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => { pendingRequests.delete(echo); reject(new Error('Timeout')); }, 5000); 
+        const timeout = setTimeout(() => { pendingRequests.delete(echo); reject(new Error('Timeout')); }, 5000);
         pendingRequests.set(echo, { resolve: (data) => { clearTimeout(timeout); resolve(data); }, reject });
     });
     ws.send(JSON.stringify({ action: 'get_group_list', echo }));
@@ -892,9 +892,9 @@ app.post('/api/recycle-bin/restore', authenticateToken, (req, res) => {
         saveDB(); res.json({ success: true });
     } else if (type === 'contract' && botsDB[botId]) {
         const c = botsDB[botId].contracts.find(c => c.id === id);
-        if(c) { c.deleted = false; delete c.deletedAt; saveDB(); res.json({ success: true }); }
-        else res.status(404).json({error:'Not found'});
-    } else res.status(400).json({error:'Invalid'});
+        if (c) { c.deleted = false; delete c.deletedAt; saveDB(); res.json({ success: true }); }
+        else res.status(404).json({ error: 'Not found' });
+    } else res.status(400).json({ error: 'Invalid' });
 });
 
 app.post('/api/recycle-bin/purge', authenticateToken, (req, res) => {
@@ -903,7 +903,7 @@ app.post('/api/recycle-bin/purge', authenticateToken, (req, res) => {
     else if (type === 'contract' && botsDB[botId]) {
         botsDB[botId].contracts = botsDB[botId].contracts.filter(c => c.id !== id);
         saveDB(); res.json({ success: true });
-    } else res.status(400).json({error:'Invalid'});
+    } else res.status(400).json({ error: 'Invalid' });
 });
 
 app.use((err, req, res, next) => {
@@ -978,4 +978,3 @@ ensureJwtSecret(() => {
         console.log(`NapCat Admin Panel: http://localhost:${PORT}/lincyppq`);
     });
 });
-
