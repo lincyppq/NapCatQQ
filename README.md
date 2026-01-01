@@ -44,8 +44,8 @@ node server.js
 -   默认密码：`admin123`
 
 ##  WebSocket 连接地址
-
-    ws://127.0.0.1:54321/ws/napcat
+可在server.js更改端口
+    ws://127.0.0.1:23333/ws/napcat
 
 ##  命令（可自定义）
     
