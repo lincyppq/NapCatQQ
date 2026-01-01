@@ -97,11 +97,11 @@
         const useToast = () => useContext(ToastContext);
         const useConfirm = () => useContext(ConfirmContext);
 
-        const AppContent = ({ token, mustChangePassword, configLoaded, apiHost, handleLogin, handleLogout, applyTheme }) => {
+        const AppContent = ({ token, mustChangePassword, configLoaded, apiHost, handleLogin, handleLogout, handleTokenUpdate, applyTheme }) => {
             const toast = useToast();
             if (!token) return <div className="view-transition" key="login"><LoginScreen onLogin={handleLogin} apiHost={apiHost} /></div>;
             if (!configLoaded) return <div className="view-transition" key="loading" style={{textAlign:'center', color:'rgba(255,255,255,0.6)', fontSize:'1.1rem', marginTop:'35vh'}}>Loading...</div>;
-            if (mustChangePassword) return <div className="view-transition" key="force"><AdminSettingsModal token={token} apiHost={apiHost} onClose={() => {}} onLogout={handleLogout} applyTheme={applyTheme} toast={toast} force={true} initialTab="security" /></div>;
+            if (mustChangePassword) return <div className="view-transition" key="force"><AdminSettingsModal token={token} apiHost={apiHost} onClose={() => {}} onLogout={handleLogout} onTokenUpdate={handleTokenUpdate} applyTheme={applyTheme} toast={toast} force={true} initialTab="security" /></div>;
             return <div className="view-transition" key="dash"><Dashboard token={token} apiHost={apiHost} onLogout={handleLogout} applyTheme={applyTheme} /></div>;
         };
 
@@ -119,6 +119,12 @@
             const handleLogout = () => {
                 setToken(null);
                 sessionStorage.removeItem('token');
+                setMustChangePassword(false);
+                setConfigLoaded(false);
+            };
+            const handleTokenUpdate = (newToken) => {
+                setToken(newToken);
+                sessionStorage.setItem('token', newToken);
                 setMustChangePassword(false);
                 setConfigLoaded(false);
             };
@@ -146,7 +152,7 @@
             return (
                 <ToastProvider>
                     <ConfirmProvider>
-                        <AppContent token={token} mustChangePassword={mustChangePassword} configLoaded={configLoaded} apiHost={apiHost} handleLogin={handleLogin} handleLogout={handleLogout} applyTheme={applyTheme} />
+                        <AppContent token={token} mustChangePassword={mustChangePassword} configLoaded={configLoaded} apiHost={apiHost} handleLogin={handleLogin} handleLogout={handleLogout} handleTokenUpdate={handleTokenUpdate} applyTheme={applyTheme} />
                     </ConfirmProvider>
                 </ToastProvider>
             );
@@ -249,7 +255,7 @@
                     )}
                     {editingBot && <EditBotModal bot={editingBot} token={token} apiHost={apiHost} onClose={() => setEditingBot(null)} onSuccess={fetchBots} toast={toast} />}
                     {msgBot && <SendMsgModal bot={msgBot} token={token} apiHost={apiHost} onClose={() => setMsgBot(null)} toast={toast} />}
-                    {showAdmin && <AdminSettingsModal token={token} apiHost={apiHost} onClose={() => setShowAdmin(false)} onLogout={onLogout} applyTheme={applyTheme} toast={toast} />}
+                    {showAdmin && <AdminSettingsModal token={token} apiHost={apiHost} onClose={() => setShowAdmin(false)} onLogout={onLogout} onTokenUpdate={(newToken) => { sessionStorage.setItem('token', newToken); window.location.reload(); }} applyTheme={applyTheme} toast={toast} />}
                     {showLogs && <LogViewerModal token={token} apiHost={apiHost} onClose={() => setShowLogs(false)} />}
                     {showLoginHistory && <LoginHistoryModal token={token} apiHost={apiHost} onClose={() => setShowLoginHistory(false)} />}
                     {showAddBot && <AddBotModal token={token} apiHost={apiHost} onClose={() => setShowAddBot(false)} onSuccess={fetchBots} toast={toast} />}
@@ -633,17 +639,18 @@
             );
         };
 
-        const AdminSettingsModal = ({ token, apiHost, onClose, onLogout, applyTheme, toast, force = false, initialTab = 'personalization' }) => {
+        const AdminSettingsModal = ({ token, apiHost, onClose, onLogout, onTokenUpdate, applyTheme, toast, force = false, initialTab = 'personalization' }) => {
             const [config, setConfig] = useState(null);
             const [tab, setTab] = useState(initialTab);
             const [backups, setBackups] = useState([]);
             const [testGroup, setTestGroup] = useState('');
             const [saveStatus, setSaveStatus] = useState('保存');
+            const [currentUsername, setCurrentUsername] = useState('');
             const confirm = useConfirm();
             const fileInputRef = useRef(null);
 
             useEffect(() => {
-                fetch(`${apiHost}/api/admin/config`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setConfig).catch(() => { toast.error('加载配置失败'); });
+                fetch(`${apiHost}/api/admin/config`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(data => { setConfig(data); setCurrentUsername(data.username || 'admin'); }).catch(() => { toast.error('加载配置失败'); });
                 if (!force) fetch(`${apiHost}/api/backups`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(setBackups).catch(() => { toast.error('加载备份列表失败'); });
             }, []);
 
@@ -748,9 +755,10 @@
                             {tab === 'security' && (
                                 <div>
                                     {force && <div style={{padding:'0.75rem 1rem', background:'rgba(255,149,0,0.15)', border:'1px solid rgba(255,149,0,0.35)', borderRadius:'var(--radius-sm)', color:'var(--warning)', marginBottom:'1rem'}}>首次登录请修改管理员账号或密码。</div>}
+                                    <div style={{padding:'0.75rem 1rem', background:'rgba(0,122,255,0.1)', border:'1px solid rgba(0,122,255,0.3)', borderRadius:'var(--radius-sm)', color:'var(--primary)', marginBottom:'1rem', display:'flex', alignItems:'center', gap:'0.5rem'}}><strong>当前用户名:</strong> {currentUsername}</div>
                                     <div className="form-group"><label className="stat-label">新管理员账号</label><input className="form-control" placeholder="不修改请留空" onChange={e => setConfig({...config, newUsername: e.target.value})} /></div>
                                     <div className="form-group" style={{marginTop:'1rem'}}><label className="stat-label">新密码</label><input className="form-control" type="password" placeholder="不修改请留空" onChange={e => setConfig({...config, newPassword: e.target.value})} /></div>
-                                    <button className="btn btn-warning" style={{marginTop:'1rem', width:'100%'}} onClick={async () => { if (config.newUsername || config.newPassword) { await fetch(`${apiHost}/api/admin/change-password`, { method:'POST', headers:{'Content-Type':'application/json', 'Authorization':`Bearer ${token}`}, body: JSON.stringify(config) }); onLogout(); } }}>修改并重新登录</button>
+                                    <button className="btn btn-warning" style={{marginTop:'1rem', width:'100%'}} onClick={async () => { if (config.newUsername || config.newPassword) { const res = await fetch(`${apiHost}/api/admin/change-password`, { method:'POST', headers:{'Content-Type':'application/json', 'Authorization':`Bearer ${token}`}, body: JSON.stringify(config) }); const data = await res.json(); if (data.token) { toast.success('修改成功，自动更新登录状态'); if (onTokenUpdate) onTokenUpdate(data.token); else { sessionStorage.setItem('token', data.token); setTimeout(() => window.location.reload(), 500); } } else { onLogout(); } } }}>{force ? '修改并继续' : '修改并重新登录'}</button>
                                 </div>
                             )}
                         </div>
