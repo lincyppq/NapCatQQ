@@ -1,4 +1,3 @@
-
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -17,7 +16,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 // --- Configuration ---
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 54321;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 23333;
 const JWT_SECRET_FILE = path.join(__dirname, 'jwt_secret.txt');
 let JWT_SECRET = process.env.JWT_SECRET || '';
 const DB_FILE = path.join(__dirname, 'bots.json');
@@ -277,14 +276,35 @@ const performBackup = () => {
 
 // --- Middleware ---
 app.set('trust proxy', TRUST_PROXY);
-app.use(cors({
-    origin: (origin, cb) => {
-        if (!origin) return cb(null, true);
-        const allowList = ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : DEFAULT_ALLOWED_ORIGINS;
-        if (allowList.includes(origin)) return cb(null, true);
-        return cb(new Error('Not allowed by CORS'));
+const isPrivateIp = (ip) => {
+    if (!ip) return false;
+    if (ip === 'localhost') return true;
+    const parts = ip.split('.').map(n => parseInt(n, 10));
+    if (parts.length !== 4 || parts.some(n => Number.isNaN(n))) return false;
+    if (parts[0] === 10) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    return ip === '127.0.0.1';
+};
+
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    const host = req.headers.host;
+    const dynamicOrigins = host ? [`http://${host}`, `https://${host}`] : [];
+    const allowList = new Set([...ALLOWED_ORIGINS, ...DEFAULT_ALLOWED_ORIGINS, ...dynamicOrigins]);
+    if (origin) {
+        try {
+            const originUrl = new URL(origin);
+            const originHost = originUrl.hostname;
+            if (!allowList.has(origin) && !isPrivateIp(originHost)) {
+                return res.status(403).json({ error: 'Not allowed by CORS' });
+            }
+        } catch (e) {
+            return res.status(403).json({ error: 'Not allowed by CORS' });
+        }
     }
-}));
+    return cors({ origin: true })(req, res, next);
+});
 app.use(express.json({ limit: '1mb' }));
 
 // --- Routes ---
