@@ -658,7 +658,7 @@
 
             if (!config) return <div className="modal-overlay"><div className="modal-content" style={{ maxWidth: '500px', padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading settings...</div></div>;
 
-            const tabs = force ? ['security'] : ['personalization', 'interaction', 'notification', 'strategy', 'backup', 'security'];
+            const tabs = force ? ['security'] : ['personalization', 'interaction', 'notification', 'email', 'strategy', 'backup', 'security'];
 
             const handleSave = async () => {
                 setSaveStatus('Saving...');
@@ -709,7 +709,7 @@
                         <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '0 1rem', overflowX: 'auto' }}>
                             {tabs.map(t => (
                                 <div key={t} style={{ padding: '1rem', cursor: 'pointer', color: tab === t ? 'var(--primary)' : 'var(--text-secondary)', borderBottom: tab === t ? '2px solid var(--primary)' : 'none', whiteSpace: 'nowrap' }} onClick={() => setTab(t)}>{
-                                    { personalization: '个性化', interaction: '指令', notification: '通知模板', strategy: '自动退群', backup: '备份恢复', security: '安全' }[t]
+                                    { personalization: '个性化', interaction: '指令', notification: '通知模板', email: '邮件通知', strategy: '自动退群', backup: '备份恢复', security: '安全' }[t]
                                 }</div>
                             ))}
                         </div>
@@ -735,6 +735,22 @@
                                     <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">预警通知内容</label><textarea className="form-control" rows="3" value={config.warningMessage ?? ''} onChange={e => setConfig({ ...config, warningMessage: e.target.value })}></textarea></div>
                                     <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">到期通知内容</label><textarea className="form-control" rows="3" value={config.defaultNotifyMessage ?? ''} onChange={e => setConfig({ ...config, defaultNotifyMessage: e.target.value })}></textarea></div>
                                     <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">续费指引内容</label><textarea className="form-control" rows="3" value={config.renewalMessage ?? ''} onChange={e => setConfig({ ...config, renewalMessage: e.target.value })}></textarea></div>
+                                </div>
+                            )}
+                            {tab === 'email' && (
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.05)', padding: '1rem', borderRadius: 'var(--radius-sm)', marginBottom: '1rem' }}><span>启用邮件通知</span><label className="switch"><input type="checkbox" checked={config.emailNotification?.enabled ?? false} onChange={e => setConfig({ ...config, emailNotification: { ...config.emailNotification, enabled: e.target.checked } })} /><span className="slider"></span></label></div>
+                                    {config.emailNotification?.enabled && (
+                                        <div style={{ animation: 'fadeIn 0.3s' }}>
+                                            <div style={{ padding: '0.75rem 1rem', background: 'rgba(0,122,255,0.1)', border: '1px solid rgba(0,122,255,0.3)', borderRadius: 'var(--radius-sm)', color: 'var(--primary)', marginBottom: '1rem', fontSize: '0.9rem' }}>💡 使用 QQ 邮箱：登录网页版 → 设置 → 账户 → 开启 SMTP 服务 → 获取授权码(不是QQ密码)</div>
+                                            <div className="form-group"><label className="stat-label">SMTP 服务器</label><input className="form-control" value={config.emailNotification?.smtpHost ?? 'smtp.qq.com'} onChange={e => setConfig({ ...config, emailNotification: { ...config.emailNotification, smtpHost: e.target.value } })} placeholder="smtp.qq.com" /></div>
+                                            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}><div className="form-group" style={{ flex: 1 }}><label className="stat-label">SMTP 端口</label><input type="number" className="form-control" value={config.emailNotification?.smtpPort ?? 465} onChange={e => setConfig({ ...config, emailNotification: { ...config.emailNotification, smtpPort: parseInt(e.target.value) } })} /></div><div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: '0.5rem' }}><label className="switch" style={{ marginBottom: 0 }}><input type="checkbox" checked={config.emailNotification?.smtpSecure ?? true} onChange={e => setConfig({ ...config, emailNotification: { ...config.emailNotification, smtpSecure: e.target.checked } })} /><span className="slider"></span></label><span style={{ marginLeft: '0.5rem', fontSize: '0.9rem' }}>使用 SSL</span></div></div>
+                                            <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">发件邮箱</label><input className="form-control" type="email" value={config.emailNotification?.smtpUser ?? ''} onChange={e => setConfig({ ...config, emailNotification: { ...config.emailNotification, smtpUser: e.target.value } })} placeholder="your@email.com" /></div>
+                                            <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">邮箱授权码</label><input className="form-control" type="password" value={config.emailNotification?.smtpPass ?? ''} onChange={e => setConfig({ ...config, emailNotification: { ...config.emailNotification, smtpPass: e.target.value } })} placeholder="授权码(不是登录密码)" /></div>
+                                            <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">接收通知邮箱</label><input className="form-control" type="email" value={config.emailNotification?.recipientEmail ?? ''} onChange={e => setConfig({ ...config, emailNotification: { ...config.emailNotification, recipientEmail: e.target.value } })} placeholder="recipient@email.com" /></div>
+                                            <button className="btn btn-primary" style={{ marginTop: '1rem', width: '100%' }} onClick={async () => { try { const res = await fetch(`${apiHost}/api/admin/test-email`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); const data = await res.json(); if (res.ok) toast.success(data.message || '测试邮件已发送'); else toast.error(data.error || '发送失败'); } catch (e) { toast.error('发送失败'); } }}>📧 发送测试邮件</button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             {tab === 'strategy' && (
