@@ -10,6 +10,7 @@ const cors = require('cors');
 const cron = require('node-cron');
 const multer = require('multer');
 const axios = require('axios');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const server = http.createServer(app);
@@ -91,11 +92,22 @@ let adminConfig = {
         primaryColor: '#007AFF',
         backgroundImage: '',
         overlayOpacity: 0.4
+    },
+    // Email Notification
+    emailNotification: {
+        enabled: false,
+        smtpHost: 'smtp.qq.com',
+        smtpPort: 465,
+        smtpSecure: true,
+        smtpUser: '',
+        smtpPass: '',
+        recipientEmail: ''
     }
 };
 
 let logs = [];
 let loginHistory = [];
+const offlineNotificationCache = new Map(); // Track last notification time for each bot
 
 if (fs.existsSync(ADMIN_FILE)) {
     try {
@@ -274,6 +286,74 @@ const performBackup = () => {
     } catch (e) { writeLog('SYSTEM', '备份失败', `备份出错: ${e.message}`); }
 };
 
+// --- Email Notification System ---
+const sendOfflineEmail = async (botId, botName) => {
+    try {
+        const emailConfig = adminConfig.emailNotification;
+
+        // Check if email notification is enabled and configured
+        if (!emailConfig.enabled) return;
+        if (!emailConfig.smtpUser || !emailConfig.smtpPass || !emailConfig.recipientEmail) {
+            console.warn('Email notification enabled but not fully configured');
+            return;
+        }
+
+        // Create transporter
+        const transporter = nodemailer.createTransport({
+            host: emailConfig.smtpHost,
+            port: emailConfig.smtpPort,
+            secure: emailConfig.smtpSecure,
+            auth: {
+                user: emailConfig.smtpUser,
+                pass: emailConfig.smtpPass
+            }
+        });
+
+        // Format timestamp
+        const now = new Date();
+        const timeStr = now.toLocaleString('zh-CN', {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        // Email content
+        const mailOptions = {
+            from: `"NapCat 监控系统" <${emailConfig.smtpUser}>`,
+            to: emailConfig.recipientEmail,
+            subject: `⚠️ 机器人掉线通知 - ${botName || botId}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+                    <div style="background-color: #fff; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <h2 style="color: #ff4444; margin-top: 0;">⚠️ 机器人掉线通知</h2>
+                        <div style="background-color: #fff3cd; border-left: 4px solid #ff9800; padding: 15px; margin: 20px 0;">
+                            <p style="margin: 5px 0;"><strong>机器人账号：</strong>${botId}</p>
+                            <p style="margin: 5px 0;"><strong>机器人名称：</strong>${botName || '未设置'}</p>
+                            <p style="margin: 5px 0;"><strong>掉线时间：</strong>${timeStr}</p>
+                        </div>
+                        <p style="color: #666; margin-top: 20px;">请及时检查机器人状态并进行处理。</p>
+                        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                        <p style="color: #999; font-size: 12px; margin-bottom: 0;">此邮件由 NapCat 管理系统自动发送，请勿回复。</p>
+                    </div>
+                </div>
+            `
+        };
+
+        // Send email
+        await transporter.sendMail(mailOptions);
+        writeLog('SYSTEM', '邮件通知', `已发送掉线通知邮件: ${botName || botId}`);
+        console.log(`✅ Offline email sent for bot ${botId}`);
+
+    } catch (error) {
+        console.error('Failed to send offline email:', error.message);
+        writeLog('SYSTEM', '邮件发送失败', `发送失败: ${error.message}`);
+    }
+};
+
 // --- Middleware ---
 app.set('trust proxy', TRUST_PROXY);
 const isPrivateIp = (ip) => {
@@ -372,7 +452,14 @@ wss.on('connection', (ws, req) => {
 
         ws.on('close', () => {
             activeConnections.delete(String(selfId));
-            if (botsDB[selfId]) botsDB[selfId].status = 'offline';
+            if (botsDB[selfId]) {
+                botsDB[selfId].status = 'offline';
+                // Send email notification immediately on disconnect
+                const botName = botsDB[selfId].name || `Bot ${selfId}`;
+                sendOfflineEmail(String(selfId), botName).catch(err => {
+                    console.error('Email notification error:', err);
+                });
+            }
             writeLog('BOT', '机器人下线', `账号 ${selfId} 已断开`);
         });
 
@@ -443,6 +530,11 @@ setInterval(() => {
         if (!shouldBeOnline && botsDB[id].status !== 'offline') {
             botsDB[id].status = 'offline';
             writeLog('BOT', '机器人离线', `账号 ${id} 心跳超时`);
+            // Send email notification on heartbeat timeout
+            const botName = botsDB[id].name || `Bot ${id}`;
+            sendOfflineEmail(String(id), botName).catch(err => {
+                console.error('Email notification error:', err);
+            });
         }
     });
 }, WS_HEARTBEAT_INTERVAL_MS);
@@ -514,7 +606,8 @@ const sanitizeAdminUpdate = (input = {}) => {
         'cmdPrefix',
         'cmdQuery',
         'cmdRenew',
-        'uiTheme'
+        'uiTheme',
+        'emailNotification'
     ]);
     const out = {};
     Object.keys(input).forEach(key => {
@@ -524,6 +617,18 @@ const sanitizeAdminUpdate = (input = {}) => {
                 primaryColor: String(input.uiTheme.primaryColor || adminConfig.uiTheme?.primaryColor || '#007AFF'),
                 backgroundImage: String(input.uiTheme.backgroundImage || ''),
                 overlayOpacity: typeof input.uiTheme.overlayOpacity === 'number' ? input.uiTheme.overlayOpacity : adminConfig.uiTheme?.overlayOpacity ?? 0.4
+            };
+            return;
+        }
+        if (key === 'emailNotification' && input.emailNotification && typeof input.emailNotification === 'object') {
+            out.emailNotification = {
+                enabled: Boolean(input.emailNotification.enabled),
+                smtpHost: String(input.emailNotification.smtpHost || adminConfig.emailNotification?.smtpHost || 'smtp.qq.com'),
+                smtpPort: parseInt(input.emailNotification.smtpPort, 10) || 465,
+                smtpSecure: Boolean(input.emailNotification.smtpSecure ?? true),
+                smtpUser: String(input.emailNotification.smtpUser || ''),
+                smtpPass: String(input.emailNotification.smtpPass || ''),
+                recipientEmail: String(input.emailNotification.recipientEmail || '')
             };
             return;
         }
@@ -590,7 +695,8 @@ app.get('/api/admin/config', authenticateToken, (req, res) => {
         cmdPrefix: adminConfig.cmdPrefix,
         cmdQuery: adminConfig.cmdQuery,
         cmdRenew: adminConfig.cmdRenew,
-        uiTheme: adminConfig.uiTheme
+        uiTheme: adminConfig.uiTheme,
+        emailNotification: adminConfig.emailNotification
     });
 });
 
@@ -616,6 +722,58 @@ app.post('/api/admin/test-msg', authenticateToken, (req, res) => {
     const ws = activeConnections.get(onlineBotId);
     ws.send(JSON.stringify({ action: 'send_group_msg', params: { group_id: parseInt(targetGroup), message } }));
     res.json({ success: true });
+});
+
+app.post('/api/admin/test-email', authenticateToken, async (req, res) => {
+    try {
+        const emailConfig = adminConfig.emailNotification;
+
+        if (!emailConfig.smtpUser || !emailConfig.smtpPass || !emailConfig.recipientEmail) {
+            return res.status(400).json({ error: '邮箱配置不完整，请先配置 SMTP 信息' });
+        }
+
+        const transporter = nodemailer.createTransport({
+            host: emailConfig.smtpHost,
+            port: emailConfig.smtpPort,
+            secure: emailConfig.smtpSecure,
+            auth: {
+                user: emailConfig.smtpUser,
+                pass: emailConfig.smtpPass
+            }
+        });
+
+        const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+
+        const mailOptions = {
+            from: `"NapCat 监控系统" <${emailConfig.smtpUser}>`,
+            to: emailConfig.recipientEmail,
+            subject: '📧 测试邮件 - NapCat 监控系统',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+                    <div style="background-color: #fff; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <h2 style="color: #4CAF50; margin-top: 0;">✅ 测试邮件发送成功！</h2>
+                        <p>恭喜！您的邮件通知配置正确。</p>
+                        <div style="background-color: #e8f5e9; border-left: 4px solid #4CAF50; padding: 15px; margin: 20px 0;">
+                            <p style="margin: 5px 0;"><strong>发送时间：</strong>${now}</p>
+                            <p style="margin: 5px 0;"><strong>SMTP 服务器：</strong>${emailConfig.smtpHost}:${emailConfig.smtpPort}</p>
+                        </div>
+                        <p style="color: #666; margin-top: 20px;">当机器人掉线时，系统会自动发送通知邮件到此邮箱。</p>
+                        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                        <p style="color: #999; font-size: 12px; margin-bottom: 0;">此邮件由 NapCat 管理系统发送。</p>
+                    </div>
+                </div>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+        writeLog('SYSTEM', '测试邮件', '测试邮件发送成功');
+        res.json({ success: true, message: '测试邮件已发送，请检查收件箱' });
+
+    } catch (error) {
+        console.error('Test email failed:', error.message);
+        writeLog('SYSTEM', '测试邮件失败', `错误: ${error.message}`);
+        res.status(500).json({ error: `发送失败: ${error.message}` });
+    }
 });
 
 app.get('/api/logs', authenticateToken, (req, res) => res.json(logs));
