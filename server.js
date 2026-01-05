@@ -287,7 +287,7 @@ const performBackup = () => {
 };
 
 // --- Email Notification System ---
-const sendOfflineEmail = async (botId, botName) => {
+const sendOfflineEmail = async (botId, botName, reason = '连接断开') => {
     try {
         const emailConfig = adminConfig.emailNotification;
 
@@ -323,7 +323,7 @@ const sendOfflineEmail = async (botId, botName) => {
 
         // Email content
         const mailOptions = {
-            from: `"NapCat 监控系统" <${emailConfig.smtpUser}>`,
+            from: `\"NapCat 监控系统\" <${emailConfig.smtpUser}>`,
             to: emailConfig.recipientEmail,
             subject: `⚠️ 机器人掉线通知 - ${botName || botId}`,
             html: `
@@ -333,7 +333,8 @@ const sendOfflineEmail = async (botId, botName) => {
                         <div style="background-color: #fff3cd; border-left: 4px solid #ff9800; padding: 15px; margin: 20px 0;">
                             <p style="margin: 5px 0;"><strong>机器人账号：</strong>${botId}</p>
                             <p style="margin: 5px 0;"><strong>机器人名称：</strong>${botName || '未设置'}</p>
-                            <p style="margin: 5px 0;"><strong>掉线时间：</strong>${timeStr}</p>
+                            <p style="margin: 5px 0;"><strong>故障原因：</strong>${reason}</p>
+                            <p style="margin: 5px 0;"><strong>检测时间：</strong>${timeStr}</p>
                         </div>
                         <p style="color: #666; margin-top: 20px;">请及时检查机器人状态并进行处理。</p>
                         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
@@ -345,8 +346,8 @@ const sendOfflineEmail = async (botId, botName) => {
 
         // Send email
         await transporter.sendMail(mailOptions);
-        writeLog('SYSTEM', '邮件通知', `已发送掉线通知邮件: ${botName || botId}`);
-        console.log(`✅ Offline email sent for bot ${botId}`);
+        writeLog('SYSTEM', '邮件通知', `已发送掉线通知邮件: ${botName || botId} (${reason})`);
+        console.log(`✅ Offline email sent for bot ${botId} (${reason})`);
 
     } catch (error) {
         console.error('Failed to send offline email:', error.message);
@@ -402,6 +403,8 @@ botsDB = normalizeBotsDB(botsDB);
 const saveDB = () => queueWrite(DB_FILE, botsDB);
 
 const activeConnections = new Map();
+const botErrorCount = new Map(); // Track consecutive errors per bot
+const healthCheckPending = new Map(); // Track pending health checks
 const pendingRequests = new Map();
 const isBotOnline = (bot) => {
     const ws = activeConnections.get(String(bot.id));
@@ -468,6 +471,35 @@ wss.on('connection', (ws, req) => {
                 ws.isAlive = true;
                 markBotSeen(String(selfId));
                 const msg = JSON.parse(message);
+
+                // --- 方案一：检测消息发送失败 ---
+                if (msg.status === 'failed' || (msg.retcode && msg.retcode < 0)) {
+                    const currentCount = (botErrorCount.get(String(selfId)) || 0) + 1;
+                    botErrorCount.set(String(selfId), currentCount);
+
+                    console.warn(`⚠️ Bot ${selfId} error detected (${currentCount}/3):`, msg.data?.errMsg || msg.message || 'Unknown error');
+
+                    if (currentCount >= 3) {
+                        const botName = botsDB[selfId]?.name || `Bot ${selfId}`;
+                        sendOfflineEmail(String(selfId), botName, '连续发送失败').catch(err => {
+                            console.error('Email notification error:', err);
+                        });
+                        writeLog('BOT', '功能异常', `账号 ${selfId} 连续发送失败`);
+                        botErrorCount.set(String(selfId), 0); // 重置计数
+                    }
+                } else if (msg.status === 'ok' || (msg.retcode !== undefined && msg.retcode === 0)) {
+                    // 成功响应，重置错误计数
+                    botErrorCount.set(String(selfId), 0);
+                }
+
+                // --- 方案四：健康检查响应 ---
+                if (msg.echo && msg.echo.startsWith('health_check_')) {
+                    healthCheckPending.delete(msg.echo);
+                    // 健康检查成功，重置错误计数
+                    botErrorCount.set(String(selfId), 0);
+                    return;
+                }
+
                 if (msg.echo && pendingRequests.has(msg.echo)) {
                     const { resolve } = pendingRequests.get(msg.echo);
                     resolve(msg);
@@ -538,6 +570,42 @@ setInterval(() => {
         }
     });
 }, WS_HEARTBEAT_INTERVAL_MS);
+
+// --- 方案四：定期健康检查 (每2分钟) ---
+setInterval(() => {
+    Object.keys(botsDB).forEach(botId => {
+        if (botsDB[botId].deleted || botsDB[botId].status === 'offline') return;
+
+        const ws = activeConnections.get(String(botId));
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        const echo = `health_check_${botId}_${Date.now()}`;
+        healthCheckPending.set(echo, botId);
+
+        // 发送健康检查请求
+        try {
+            ws.send(JSON.stringify({
+                action: 'get_login_info',
+                echo: echo
+            }));
+
+            // 5秒后检查是否收到响应
+            setTimeout(() => {
+                if (healthCheckPending.has(echo)) {
+                    healthCheckPending.delete(echo);
+                    const botName = botsDB[botId]?.name || `Bot ${botId}`;
+                    console.warn(`⚠️ Bot ${botId} health check failed (no response)`);
+                    sendOfflineEmail(String(botId), botName, '健康检查失败').catch(err => {
+                        console.error('Email notification error:', err);
+                    });
+                    writeLog('BOT', '健康检查失败', `账号 ${botId} 无响应`);
+                }
+            }, 5000);
+        } catch (err) {
+            console.error(`Health check send error for bot ${botId}:`, err.message);
+        }
+    });
+}, 2 * 60 * 1000); // 每2分钟检查一次
 
 const authenticateToken = (req, res, next) => {
     const token = req.headers['authorization']?.split(' ')[1];
@@ -1028,6 +1096,65 @@ app.post('/api/bot/send', authenticateToken, (req, res) => {
         res.json({ success: true });
     } else res.status(500).json({ error: 'Bot Offline' });
 });
+
+app.post('/api/admin/bulk-extend-days', authenticateToken, (req, res) => {
+    const { days } = req.body;
+    const daysNum = parseInt(days, 10);
+
+    if (!daysNum || daysNum <= 0) {
+        return res.status(400).json({ error: '天数必须是正整数' });
+    }
+
+    const now = Date.now();
+    const msToAdd = daysNum * 24 * 60 * 60 * 1000;
+
+    let extendedCount = 0;
+    let skippedPermanent = 0;
+    let skippedExpired = 0;
+    let skippedDeleted = 0;
+
+    Object.values(botsDB).forEach(bot => {
+        if (bot.deleted) return;
+
+        bot.contracts.forEach(contract => {
+            if (contract.deleted) {
+                skippedDeleted++;
+                return;
+            }
+
+            if (!contract.expireTime) {
+                skippedPermanent++;
+                return;
+            }
+
+            if (contract.expireTime <= now) {
+                skippedExpired++;
+                return;
+            }
+
+            contract.expireTime += msToAdd;
+            extendedCount++;
+        });
+    });
+
+    if (extendedCount > 0) {
+        saveDB();
+    }
+
+    writeLog('OPERATION', '批量加天数', `增加 ${daysNum} 天,影响 ${extendedCount} 个合约`);
+
+    res.json({
+        success: true,
+        extended: extendedCount,
+        skipped: {
+            permanent: skippedPermanent,
+            expired: skippedExpired,
+            deleted: skippedDeleted
+        },
+        days: daysNum
+    });
+});
+
 
 app.post('/api/upload', authenticateToken, uploadImage.single('image'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file' });
