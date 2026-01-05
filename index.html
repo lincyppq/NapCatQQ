@@ -658,7 +658,7 @@
 
             if (!config) return <div className="modal-overlay"><div className="modal-content" style={{ maxWidth: '500px', padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading settings...</div></div>;
 
-            const tabs = force ? ['security'] : ['personalization', 'interaction', 'notification', 'email', 'strategy', 'backup', 'security'];
+            const tabs = force ? ['security'] : ['personalization', 'interaction', 'notification', 'email', 'strategy', 'compensation', 'backup', 'security'];
 
             const handleSave = async () => {
                 setSaveStatus('Saving...');
@@ -709,7 +709,7 @@
                         <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '0 1rem', overflowX: 'auto' }}>
                             {tabs.map(t => (
                                 <div key={t} style={{ padding: '1rem', cursor: 'pointer', color: tab === t ? 'var(--primary)' : 'var(--text-secondary)', borderBottom: tab === t ? '2px solid var(--primary)' : 'none', whiteSpace: 'nowrap' }} onClick={() => setTab(t)}>{
-                                    { personalization: '个性化', interaction: '指令', notification: '通知模板', email: '邮件通知', strategy: '自动退群', backup: '备份恢复', security: '安全' }[t]
+                                    { personalization: '个性化', interaction: '指令', notification: '通知模板', email: '邮件通知', strategy: '自动退群', compensation: '批量补偿', backup: '备份恢复', security: '安全' }[t]
                                 }</div>
                             ))}
                         </div>
@@ -762,6 +762,70 @@
                                             <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">退群告别语</label><textarea className="form-control" rows="3" value={config.quitMessage ?? ''} onChange={e => setConfig({ ...config, quitMessage: e.target.value })}></textarea></div>
                                         </div>
                                     )}
+                                </div>
+                            )}
+                            {tab === 'compensation' && (
+                                <div>
+                                    <div style={{ padding: '0.75rem 1rem', background: 'rgba(255,149,0,0.15)', border: '1px solid rgba(255,149,0,0.35)', borderRadius: 'var(--radius-sm)', color: 'var(--warning)', marginBottom: '1rem' }}>
+                                        ⚠️ 此功能将为所有机器人的所有未过期授权统一增加天数,用于机器人维护补偿。
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="stat-label">补偿天数</label>
+                                        <input
+                                            type="number"
+                                            className="form-control"
+                                            placeholder="输入要增加的天数"
+                                            id="bulkDaysInput"
+                                            min="1"
+                                        />
+                                    </div>
+                                    <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                                        <div style={{ marginBottom: '0.5rem', fontWeight: '600', color: 'var(--text-primary)' }}>说明:</div>
+                                        <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
+                                            <li>仅对未过期的授权增加天数</li>
+                                            <li>永久授权将被跳过</li>
+                                            <li>已删除的授权将被跳过</li>
+                                            <li>操作将记录在审计日志中</li>
+                                        </ul>
+                                    </div>
+                                    <button
+                                        className="btn btn-warning"
+                                        style={{ marginTop: '1rem', width: '100%' }}
+                                        onClick={async () => {
+                                            const days = parseInt(document.getElementById('bulkDaysInput').value);
+                                            if (!days || days <= 0) return toast.error('请输入有效的天数');
+
+                                            if (!await confirm(`确定要为所有未过期授权增加 ${days} 天吗？此操作不可撤销！`)) return;
+
+                                            try {
+                                                const res = await fetch(`${apiHost}/api/admin/bulk-extend-days`, {
+                                                    method: 'POST',
+                                                    headers: {
+                                                        'Content-Type': 'application/json',
+                                                        'Authorization': `Bearer ${token}`
+                                                    },
+                                                    body: JSON.stringify({ days })
+                                                });
+
+                                                const data = await res.json();
+
+                                                if (res.ok) {
+                                                    const msg = `✅ 成功延长 ${data.extended} 个授权\n` +
+                                                        `跳过: 永久授权 ${data.skipped.permanent} 个, ` +
+                                                        `已过期 ${data.skipped.expired} 个, ` +
+                                                        `已删除 ${data.skipped.deleted} 个`;
+                                                    toast.success(msg);
+                                                    document.getElementById('bulkDaysInput').value = '';
+                                                } else {
+                                                    toast.error(data.error || '操作失败');
+                                                }
+                                            } catch (e) {
+                                                toast.error('操作失败');
+                                            }
+                                        }}
+                                    >
+                                        🎁 执行批量补偿
+                                    </button>
                                 </div>
                             )}
                             {tab === 'backup' && (
