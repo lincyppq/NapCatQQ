@@ -34,7 +34,7 @@ node server.js
 
 在浏览器打开：
 
-    http://localhost:54321
+    http://localhost:23333
 
 如需外网访问，请进行内网穿透或开放 54321 公网端口。
 
