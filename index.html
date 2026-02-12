@@ -279,9 +279,39 @@
         const BotCard = ({ bot, onEdit, onMsg }) => {
             const activeContracts = bot.contracts?.filter(c => !c.expireTime || c.expireTime > Date.now()).length || 0;
             const avatarUrl = resolveAvatar(bot.id, bot.avatar);
+            const toast = useToast();
+            const confirm = useConfirm();
+            const isPaused = Boolean(bot.pausedAt);
+
+            const handlePauseToggle = async () => {
+                const action = isPaused ? 'resume' : 'pause';
+                const actionText = isPaused ? '恢复租赁扣时' : '暂停租赁扣时';
+                if (!await confirm(`确定要${actionText}吗？`)) return;
+
+                try {
+                    const res = await fetch(`/api/bot/${action}-rental`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${sessionStorage.getItem('token')}`
+                        },
+                        body: JSON.stringify({ botId: bot.id })
+                    });
+                    if (res.ok) {
+                        toast.success(isPaused ? '已恢复扣时' : '已暂停扣时');
+                        window.location.reload();
+                    } else {
+                        toast.error('操作失败');
+                    }
+                } catch (e) {
+                    toast.error('操作失败');
+                }
+            };
+
             return (
                 <div className="bot-card">
                     <div className={`status-badge ${bot.isOnline ? 'status-online' : 'status-offline'}`}><span className="status-dot"></span><span>{bot.isOnline ? 'Online' : 'Offline'}</span></div>
+                    {isPaused && <div className="status-badge" style={{ background: 'rgba(255,149,0,0.2)', color: 'var(--warning)', top: '3.5rem' }}><span className="status-dot" style={{ background: 'var(--warning)' }}></span><span>已暂停</span></div>}
                     <div className="bot-info">
                         <div className="bot-avatar">
                             <img src={avatarUrl} onError={(e) => { const fallback = `https://q1.qlogo.cn/g?b=qq&nk=${bot.id}&s=100`; if (e.target.src !== fallback) e.target.src = fallback; else { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; } }} />
@@ -294,7 +324,11 @@
                         <div style={{ width: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
                         <div className="stat-item"><span className="stat-label">总配置</span><span className="stat-value">{bot.contracts?.length || 0}</span></div>
                     </div>
-                    <div className="actions"><button className="btn btn-primary" onClick={onEdit}>管理</button><button className="btn btn-secondary" onClick={onMsg} disabled={!bot.isOnline}>发消息</button></div>
+                    <div className="actions">
+                        <button className="btn btn-primary" onClick={onEdit}>管理</button>
+                        <button className="btn btn-secondary" onClick={onMsg} disabled={!bot.isOnline}>发消息</button>
+                        <button className={`btn ${isPaused ? 'btn-success' : 'btn-warning'}`} onClick={handlePauseToggle} style={{ fontSize: '0.85rem', padding: '0.5rem 0.75rem' }}>{isPaused ? '恢复扣时' : '暂停扣时'}</button>
+                    </div>
                 </div>
             );
         };
@@ -489,6 +523,7 @@
             const [sortOrder, setSortOrder] = useState('asc');
             const [realTimeGroups, setRealTimeGroups] = useState(new Set());
             const [showGhostScan, setShowGhostScan] = useState(false);
+            const [showBulkDays, setShowBulkDays] = useState(false);
             const fileInputRef = useRef(null);
             const confirm = useConfirm();
             useEffect(() => { setContracts(bot.contracts || []); setName(bot.name); setAvatar(bot.avatar || ''); }, [bot]);
@@ -541,8 +576,17 @@
                             <div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                                     <h4 style={{ margin: 0 }}>租户 ({contracts.length})</h4>
+                                    {bot.pausedAt && (
+                                        <div style={{ padding: '0.5rem 1rem', background: 'rgba(255,149,0,0.15)', border: '1px solid rgba(255,149,0,0.35)', borderRadius: 'var(--radius-sm)', color: 'var(--warning)', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                            <Icons.Alert style={{ width: '16px', height: '16px' }} />
+                                            已暂停租赁扣时 ({new Date(bot.pausedAt).toLocaleString()})
+                                        </div>
+                                    )}
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                                         {bot.isOnline && <button className="btn btn-sm btn-secondary" onClick={() => setShowGhostScan(true)} style={{ display: 'flex', gap: '4px', alignItems: 'center' }}><Icons.Ghost /> 扫描幽灵群</button>}
+                                        <button className="btn btn-sm btn-success" onClick={() => setShowBulkDays(true)} style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>🎁 批量补偿</button>
                                         <div style={{ position: 'relative' }}><select className="form-control" style={{ padding: '0.4rem 2rem 0.4rem 0.5rem', width: 'auto', fontSize: '0.9rem', height: '34px', appearance: 'none' }} value={sortOrder} onChange={e => setSortOrder(e.target.value)}><option value="asc">到期: 近➜远</option><option value="desc">到期: 远➜近</option></select><div style={{ position: 'absolute', right: '8px', top: '8px', pointerEvents: 'none', width: '16px' }}><Icons.Sort /></div></div>
                                         <div className="input-with-icon" style={{ width: '140px' }}><Icons.Search /><input type="text" className="form-control" style={{ padding: '0.4rem 0.4rem 0.4rem 36px', fontSize: '0.9rem' }} placeholder="搜索" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
                                         <button className="btn btn-sm btn-primary" onClick={() => setEditingContract({})}>+ 授权</button>
@@ -554,9 +598,11 @@
                                             const isExpired = c.expireTime && Date.now() > c.expireTime;
                                             const daysLeft = c.expireTime ? Math.ceil((c.expireTime - Date.now()) / (1000 * 60 * 60 * 24)) : '∞';
                                             const isMissing = bot.isOnline && !c.leftGroup && !realTimeGroups.has(String(c.groupId));
+                                            const daysSinceAdded = c.daysAddedAt ? (Date.now() - c.daysAddedAt) / (1000 * 60 * 60 * 24) : null;
+                                            const showDaysAdded = c.lastDaysAdded && daysSinceAdded !== null && daysSinceAdded < 7;
                                             return (
                                                 <div className="contract-item stagger-item" key={c.id}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}><img className="group-avatar" src={`https://p.qlogo.cn/gh/${c.groupId}/${c.groupId}/100`} onError={e => e.target.src = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'} /><div><div style={{ fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>{c.groupName || c.groupId}{c.leftGroup && <span className="tag-left">已退群</span>}{isMissing && <span className="tag-missing"><Icons.Alert /> 不在群</span>}</div><div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '2px' }}>{c.groupId} · {isExpired ? <span style={{ color: 'var(--danger)' }}>过期</span> : <span style={{ color: 'var(--success)' }}>{daysLeft} 天</span>}</div></div></div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}><img className="group-avatar" src={`https://p.qlogo.cn/gh/${c.groupId}/${c.groupId}/100`} onError={e => e.target.src = 'data:image/svg+xml,%3csvg xmlns=%22http://www.w3.org/2000/svg%22/%3e'} /><div><div style={{ fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>{c.groupName || c.groupId}{showDaysAdded && <span style={{ color: '#007AFF', fontSize: '0.85rem', fontWeight: '500' }}>+{c.lastDaysAdded}天</span>}{c.leftGroup && <span className="tag-left">已退群</span>}{isMissing && <span className="tag-missing"><Icons.Alert /> 不在群</span>}</div><div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '2px' }}>{c.groupId} · {isExpired ? <span style={{ color: 'var(--danger)' }}>过期</span> : <span style={{ color: 'var(--success)' }}>{daysLeft} 天</span>}</div></div></div>
                                                     <div style={{ display: 'flex', gap: '0.5rem' }}>{!c.leftGroup && bot.isOnline && isExpired && <button className="btn btn-sm btn-warning" onClick={() => handleQuitGroup(c.groupId)}>退群</button>}<button className="btn btn-sm btn-secondary" onClick={() => setEditingContract(c)}>编辑</button><button className="btn btn-sm btn-secondary" onClick={() => openTransfer(c)}>转移</button><button className="btn btn-sm btn-danger" onClick={() => handleDeleteContract(c.id)}>删除</button></div>
                                                 </div>
                                             );
@@ -567,6 +613,75 @@
                         </div>
                     </div>
                     {showGhostScan && <GhostScanModal bot={bot} token={token} apiHost={apiHost} onClose={() => setShowGhostScan(false)} toast={toast} />}
+                    {showBulkDays && (
+                        <div className="modal-overlay" onClick={() => setShowBulkDays(false)}>
+                            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+                                <div className="modal-header"><h3>🎁 批量补偿天数</h3><button className="nav-btn" onClick={() => setShowBulkDays(false)}><Icons.X /></button></div>
+                                <div className="modal-body">
+                                    <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>为该机器人的所有生效授权增加天数</p>
+                                    <div className="form-group">
+                                        <label className="stat-label">增加天数</label>
+                                        <input
+                                            type="number"
+                                            id={`bulkDaysModalInput-${bot.id}`}
+                                            className="form-control"
+                                            placeholder="请输入天数"
+                                            autoFocus
+                                        />
+                                    </div>
+                                    <div style={{ padding: '0.75rem 1rem', background: 'rgba(0,122,255,0.1)', border: '1px solid rgba(0,122,255,0.3)', borderRadius: 'var(--radius-sm)', fontSize: '0.9rem', marginTop: '1rem' }}>
+                                        <div style={{ color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>说明:</div>
+                                        <div>• 只对生效中的授权增加天数</div>
+                                        <div>• 跳过已过期、永久、已删除的授权</div>
+                                    </div>
+                                </div>
+                                <div className="modal-actions">
+                                    <button className="btn btn-secondary" onClick={() => setShowBulkDays(false)}>取消</button>
+                                    <button
+                                        className="btn btn-primary"
+                                        onClick={async () => {
+                                            const input = document.getElementById(`bulkDaysModalInput-${bot.id}`);
+                                            const days = parseInt(input.value, 10);
+                                            if (!days || days <= 0) {
+                                                toast.error('请输入有效天数');
+                                                return;
+                                            }
+                                            if (!await confirm(`确定为该机器人的所有生效授权增加 ${days} 天吗？`)) return;
+
+                                            try {
+                                                const res = await fetch(`${apiHost}/api/bot/bulk-extend-days`, {
+                                                    method: 'POST',
+                                                    headers: {
+                                                        'Content-Type': 'application/json',
+                                                        'Authorization': `Bearer ${token}`
+                                                    },
+                                                    body: JSON.stringify({ botId: bot.id, days })
+                                                });
+
+                                                const data = await res.json();
+
+                                                if (res.ok) {
+                                                    const msg = `✅ 成功延长 ${data.extended} 个授权\n` +
+                                                        `跳过: 永久授权 ${data.skipped.permanent} 个, ` +
+                                                        `已过期 ${data.skipped.expired} 个, ` +
+                                                        `已删除 ${data.skipped.deleted} 个`;
+                                                    toast.success(msg);
+                                                    setShowBulkDays(false);
+                                                    onSuccess();
+                                                } else {
+                                                    toast.error(data.error || '操作失败');
+                                                }
+                                            } catch (e) {
+                                                toast.error('操作失败');
+                                            }
+                                        }}
+                                    >
+                                        确认补偿
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {showTransfer && (
                         <div className="modal-overlay" onClick={() => setShowTransfer(false)}>
                             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px' }}>
