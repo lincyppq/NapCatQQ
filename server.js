@@ -153,7 +153,9 @@ const normalizeContract = (contract) => {
         deleted: Boolean(contract.deleted),
         leftGroup: Boolean(contract.leftGroup),
         notified: Boolean(contract.notified),
-        preNotified: Boolean(contract.preNotified)
+        preNotified: Boolean(contract.preNotified),
+        lastDaysAdded: typeof contract.lastDaysAdded === 'number' ? contract.lastDaysAdded : null,
+        daysAddedAt: typeof contract.daysAddedAt === 'number' ? contract.daysAddedAt : null
     };
 };
 const normalizeBot = (bot) => {
@@ -166,6 +168,7 @@ const normalizeBot = (bot) => {
         name: bot.name || `Bot ${id}`,
         avatar: normalizeBotAvatar(id, bot.avatar),
         lastSeen: typeof bot.lastSeen === 'number' ? bot.lastSeen : 0,
+        pausedAt: typeof bot.pausedAt === 'number' ? bot.pausedAt : null,
         contracts: Array.isArray(bot.contracts) ? bot.contracts.map(normalizeContract).filter(Boolean) : []
     };
 };
@@ -1004,15 +1007,36 @@ app.post('/api/bot/contract/save', authenticateToken, (req, res) => {
     if (!botsDB[botId]) return res.status(404).json({ error: 'Not Found' });
     let contract = botsDB[botId].contracts.find(c => c.id === contractId);
     if (contract) {
-        if (expireTime > (contract.expireTime || 0)) { contract.notified = false; contract.preNotified = false; contract.leftGroup = false; }
+        const oldExpireTime = contract.expireTime || 0;
+        const newExpireTime = typeof expireTime === 'number' ? expireTime : null;
+
+        // Track days added if expireTime increased
+        if (newExpireTime && oldExpireTime && newExpireTime > oldExpireTime) {
+            const daysAdded = Math.round((newExpireTime - oldExpireTime) / (1000 * 60 * 60 * 24));
+            contract.lastDaysAdded = daysAdded;
+            contract.daysAddedAt = Date.now();
+        }
+
+        if (newExpireTime > oldExpireTime) {
+            contract.notified = false;
+            contract.preNotified = false;
+            contract.leftGroup = false;
+        }
         contract.groupId = String(groupId);
-        contract.expireTime = typeof expireTime === 'number' ? expireTime : null;
+        contract.expireTime = newExpireTime;
         if (groupName) contract.groupName = groupName;
         writeLog('OPERATION', '更新授权', `群: ${groupId}`);
     } else {
         botsDB[botId].contracts.push({
             id: genId(),
-            groupId: String(groupId), groupName: groupName || `群 ${groupId}`, expireTime: typeof expireTime === 'number' ? expireTime : null, notified: false, preNotified: false, leftGroup: false
+            groupId: String(groupId),
+            groupName: groupName || `群 ${groupId}`,
+            expireTime: typeof expireTime === 'number' ? expireTime : null,
+            notified: false,
+            preNotified: false,
+            leftGroup: false,
+            lastDaysAdded: null,
+            daysAddedAt: null
         });
         writeLog('OPERATION', '新增授权', `群: ${groupId}`);
     }
@@ -1097,6 +1121,85 @@ app.post('/api/bot/send', authenticateToken, (req, res) => {
     } else res.status(500).json({ error: 'Bot Offline' });
 });
 
+app.post('/api/bot/pause-rental', authenticateToken, (req, res) => {
+    const { botId } = req.body;
+    if (!botsDB[botId]) return res.status(404).json({ error: 'Bot not found' });
+    botsDB[botId].pausedAt = Date.now();
+    saveDB();
+    writeLog('OPERATION', '暂停扣时', `机器人 ${botId} 已暂停租赁扣时`);
+    res.json({ success: true });
+});
+
+app.post('/api/bot/resume-rental', authenticateToken, (req, res) => {
+    const { botId } = req.body;
+    if (!botsDB[botId]) return res.status(404).json({ error: 'Bot not found' });
+    botsDB[botId].pausedAt = null;
+    saveDB();
+    writeLog('OPERATION', '恢复扣时', `机器人 ${botId} 已恢复租赁扣时`);
+    res.json({ success: true });
+});
+
+app.post('/api/bot/bulk-extend-days', authenticateToken, (req, res) => {
+    const { botId, days } = req.body;
+    const daysNum = parseInt(days, 10);
+
+    if (!daysNum || daysNum <= 0) {
+        return res.status(400).json({ error: '天数必须是正整数' });
+    }
+
+    if (!botsDB[botId]) {
+        return res.status(404).json({ error: 'Bot not found' });
+    }
+
+    const now = Date.now();
+    const msToAdd = daysNum * 24 * 60 * 60 * 1000;
+
+    let extendedCount = 0;
+    let skippedPermanent = 0;
+    let skippedExpired = 0;
+    let skippedDeleted = 0;
+
+    const bot = botsDB[botId];
+    bot.contracts.forEach(contract => {
+        if (contract.deleted) {
+            skippedDeleted++;
+            return;
+        }
+
+        if (!contract.expireTime) {
+            skippedPermanent++;
+            return;
+        }
+
+        if (contract.expireTime <= now) {
+            skippedExpired++;
+            return;
+        }
+
+        contract.expireTime += msToAdd;
+        contract.lastDaysAdded = daysNum;
+        contract.daysAddedAt = now;
+        extendedCount++;
+    });
+
+    if (extendedCount > 0) {
+        saveDB();
+    }
+
+    writeLog('OPERATION', '批量加天数', `机器人 ${botId} 增加 ${daysNum} 天,影响 ${extendedCount} 个合约`);
+
+    res.json({
+        success: true,
+        extended: extendedCount,
+        skipped: {
+            permanent: skippedPermanent,
+            expired: skippedExpired,
+            deleted: skippedDeleted
+        },
+        days: daysNum
+    });
+});
+
 app.post('/api/admin/bulk-extend-days', authenticateToken, (req, res) => {
     const { days } = req.body;
     const daysNum = parseInt(days, 10);
@@ -1133,6 +1236,8 @@ app.post('/api/admin/bulk-extend-days', authenticateToken, (req, res) => {
             }
 
             contract.expireTime += msToAdd;
+            contract.lastDaysAdded = daysNum;
+            contract.daysAddedAt = now;
             extendedCount++;
         });
     });
@@ -1208,7 +1313,7 @@ cron.schedule('* * * * *', () => {
     const quitWaitTime = (adminConfig.quitWaitHours || 24) * 60 * 60 * 1000;
 
     Object.values(botsDB).forEach(bot => {
-        if (bot.deleted) return;
+        if (bot.deleted || bot.pausedAt) return;
         const ws = activeConnections.get(String(bot.id));
         const isOnline = ws && ws.readyState === WebSocket.OPEN;
         bot.contracts.forEach(c => {
