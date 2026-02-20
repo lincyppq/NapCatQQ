@@ -277,7 +277,8 @@
         };
 
         const BotCard = ({ bot, onEdit, onMsg }) => {
-            const activeContracts = bot.contracts?.filter(c => !c.expireTime || c.expireTime > Date.now()).length || 0;
+            const nowTs = bot.pausedAt || Date.now();
+            const activeContracts = bot.contracts?.filter(c => !c.expireTime || c.expireTime > nowTs).length || 0;
             const avatarUrl = resolveAvatar(bot.id, bot.avatar);
             const toast = useToast();
             const confirm = useConfirm();
@@ -486,7 +487,15 @@
             const results = useMemo(() => {
                 if (!term) return [];
                 const list = [];
-                bots.forEach(bot => { if (bot.contracts) bot.contracts.forEach(c => { if (String(c.groupId).includes(term) || (c.groupName && c.groupName.includes(term))) list.push({ ...c, botName: bot.name, botId: bot.id }); }); });
+                bots.forEach(bot => {
+                    if (bot.contracts) {
+                        bot.contracts.forEach(c => {
+                            if (String(c.groupId).includes(term) || (c.groupName && c.groupName.includes(term))) {
+                                list.push({ ...c, botName: bot.name, botId: bot.id, pausedAt: bot.pausedAt });
+                            }
+                        });
+                    }
+                });
                 return list;
             }, [term, bots]);
             return (
@@ -500,7 +509,7 @@
                                 {results.map(item => (
                                     <div key={item.id} className="contract-item stagger-item" style={{ cursor: 'pointer' }} onClick={() => { onSelect(item.botId, item); onClose(); }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}><img className="group-avatar" src={`https://p.qlogo.cn/gh/${item.groupId}/${item.groupId}/100`} /><div><div style={{ fontWeight: 600 }}>{item.groupName || item.groupId}</div><div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{item.botName} · {item.groupId}</div></div></div>
-                                        <div style={{ fontSize: '0.8rem', color: item.expireTime < Date.now() ? 'var(--danger)' : 'var(--success)' }}>{item.expireTime < Date.now() ? '已过期' : '生效中'}</div>
+                                        {(() => { const nowTs = item.pausedAt || Date.now(); const expired = item.expireTime < nowTs; return <div style={{ fontSize: '0.8rem', color: expired ? 'var(--danger)' : 'var(--success)' }}>{expired ? '已过期' : '生效中'}</div>; })()}
                                     </div>
                                 ))}
                             </div>
@@ -563,6 +572,7 @@
             const handleDeleteBot = async () => { if (!await confirm('确认删除此机器人实例？(将移入回收站)')) return; await fetch(`${apiHost}/api/bot/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ id: bot.id }) }); onClose(); onSuccess(); };
             const handleQuitGroup = async (groupId) => { if (!await confirm(`确定退出群 ${groupId}？`)) return; await fetch(`${apiHost}/api/bot/quit-group`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ botId: bot.id, groupId }) }); onSuccess(); };
             const filteredContracts = contracts.filter(c => String(c.groupId).includes(searchTerm) || (c.groupName && c.groupName.includes(searchTerm))).sort((a, b) => { const tA = a.expireTime || 32503680000000; const tB = b.expireTime || 32503680000000; if (sortOrder === 'asc') return tA - tB; return tB - tA; });
+            const effectiveNow = bot.pausedAt || Date.now();
             return (
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px' }}>
@@ -595,8 +605,8 @@
                                 {editingContract ? <ContractEditor contract={editingContract.id ? editingContract : null} botId={bot.id} token={token} apiHost={apiHost} onSave={handleSaveContract} onCancel={() => setEditingContract(null)} toast={toast} /> : (
                                     <div className="contract-list" style={{ maxHeight: '400px', overflowY: 'auto' }}>
                                         {filteredContracts.map(c => {
-                                            const isExpired = c.expireTime && Date.now() > c.expireTime;
-                                            const daysLeft = c.expireTime ? Math.ceil((c.expireTime - Date.now()) / (1000 * 60 * 60 * 24)) : '∞';
+                                            const isExpired = c.expireTime && effectiveNow > c.expireTime;
+                                            const daysLeft = c.expireTime ? Math.ceil((c.expireTime - effectiveNow) / (1000 * 60 * 60 * 24)) : '∞';
                                             const isMissing = bot.isOnline && !c.leftGroup && !realTimeGroups.has(String(c.groupId));
                                             const daysSinceAdded = c.daysAddedAt ? (Date.now() - c.daysAddedAt) / (1000 * 60 * 60 * 24) : null;
                                             const showDaysAdded = c.lastDaysAdded && daysSinceAdded !== null && daysSinceAdded < 7;
