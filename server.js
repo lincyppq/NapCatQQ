@@ -1124,7 +1124,9 @@ app.post('/api/bot/send', authenticateToken, (req, res) => {
 app.post('/api/bot/pause-rental', authenticateToken, (req, res) => {
     const { botId } = req.body;
     if (!botsDB[botId]) return res.status(404).json({ error: 'Bot not found' });
-    botsDB[botId].pausedAt = Date.now();
+    const bot = botsDB[botId];
+    if (bot.pausedAt) return res.json({ success: true, alreadyPaused: true });
+    bot.pausedAt = Date.now();
     saveDB();
     writeLog('OPERATION', '暂停扣时', `机器人 ${botId} 已暂停租赁扣时`);
     res.json({ success: true });
@@ -1132,11 +1134,23 @@ app.post('/api/bot/pause-rental', authenticateToken, (req, res) => {
 
 app.post('/api/bot/resume-rental', authenticateToken, (req, res) => {
     const { botId } = req.body;
-    if (!botsDB[botId]) return res.status(404).json({ error: 'Bot not found' });
-    botsDB[botId].pausedAt = null;
+    const bot = botsDB[botId];
+    if (!bot) return res.status(404).json({ error: 'Bot not found' });
+
+    if (!bot.pausedAt) return res.json({ success: true, alreadyResumed: true });
+
+    const pausedMs = Date.now() - bot.pausedAt;
+    if (bot.contracts && pausedMs > 0) {
+        bot.contracts.forEach(c => {
+            if (!c || c.deleted || !c.expireTime) return;
+            c.expireTime += pausedMs;
+        });
+    }
+
+    bot.pausedAt = null;
     saveDB();
-    writeLog('OPERATION', '恢复扣时', `机器人 ${botId} 已恢复租赁扣时`);
-    res.json({ success: true });
+    writeLog('OPERATION', '恢复扣时', `机器人 ${botId} 已恢复租赁扣时，补回 ${Math.round(pausedMs / (1000 * 60 * 60))} 小时`);
+    res.json({ success: true, restoredMs: pausedMs });
 });
 
 app.post('/api/bot/bulk-extend-days', authenticateToken, (req, res) => {
