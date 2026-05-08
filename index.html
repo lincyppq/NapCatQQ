@@ -210,6 +210,7 @@
             const [showLoginHistory, setShowLoginHistory] = useState(false);
             const [showRecycleBin, setShowRecycleBin] = useState(false);
             const [showSearch, setShowSearch] = useState(false);
+            const [highlightGroupId, setHighlightGroupId] = useState(null);
             const [wsUrl, setWsUrl] = useState('');
             const fetchErrorRef = useRef(0);
             const toast = useToast();
@@ -255,14 +256,14 @@
                             {bots.length === 0 && <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '4rem', color: 'rgba(255,255,255,0.4)' }}><div style={{ width: '80px', height: '80px', margin: '0 auto 1rem', color: 'var(--text-muted)' }}><Icons.Rocket /></div><h3>暂无实例</h3><p>请点击 “＋” 新增实例</p></div>}
                         </div>
                     )}
-                    {editingBot && <EditBotModal bot={editingBot} token={token} apiHost={apiHost} onClose={() => setEditingBot(null)} onSuccess={fetchBots} toast={toast} />}
+                    {editingBot && <EditBotModal bot={editingBot} token={token} apiHost={apiHost} onClose={() => { setEditingBot(null); setHighlightGroupId(null); }} onSuccess={fetchBots} toast={toast} highlightGroupId={highlightGroupId} />}
                     {msgBot && <SendMsgModal bot={msgBot} token={token} apiHost={apiHost} onClose={() => setMsgBot(null)} toast={toast} />}
                     {showAdmin && <AdminSettingsModal token={token} apiHost={apiHost} onClose={() => setShowAdmin(false)} onLogout={onLogout} onTokenUpdate={(newToken) => { sessionStorage.setItem('token', newToken); window.location.reload(); }} applyTheme={applyTheme} toast={toast} />}
                     {showLogs && <LogViewerModal token={token} apiHost={apiHost} onClose={() => setShowLogs(false)} />}
                     {showLoginHistory && <LoginHistoryModal token={token} apiHost={apiHost} onClose={() => setShowLoginHistory(false)} />}
                     {showAddBot && <AddBotModal token={token} apiHost={apiHost} onClose={() => setShowAddBot(false)} onSuccess={fetchBots} toast={toast} />}
                     {showRecycleBin && <RecycleBinModal token={token} apiHost={apiHost} onClose={() => setShowRecycleBin(false)} onSuccess={fetchBots} toast={toast} />}
-                    {showSearch && <GlobalSearchModal bots={bots} onClose={() => setShowSearch(false)} onSelect={(bid, c) => setEditingBot(bots.find(b => b.id === bid))} />}
+                    {showSearch && <GlobalSearchModal bots={bots} onClose={() => setShowSearch(false)} onSelect={(bid, c) => { setEditingBot(bots.find(b => b.id === bid)); setHighlightGroupId(c.groupId); }} />}
                 </div>
             );
         };
@@ -519,7 +520,7 @@
             );
         };
 
-        const EditBotModal = ({ bot, token, apiHost, onClose, onSuccess, toast }) => {
+        const EditBotModal = ({ bot, token, apiHost, onClose, onSuccess, toast, highlightGroupId }) => {
             const [name, setName] = useState(bot.name);
             const [avatar, setAvatar] = useState(bot.avatar || '');
             const [contracts, setContracts] = useState(bot.contracts || []);
@@ -536,6 +537,7 @@
             const fileInputRef = useRef(null);
             const confirm = useConfirm();
             useEffect(() => { setContracts(bot.contracts || []); setName(bot.name); setAvatar(bot.avatar || ''); }, [bot]);
+            useEffect(() => { if (highlightGroupId) setSearchTerm(String(highlightGroupId)); }, [highlightGroupId]);
             useEffect(() => {
                 fetch(`${apiHost}/api/bots`, { headers: { 'Authorization': `Bearer ${token}` } })
                     .then(r => r.json())
@@ -849,6 +851,9 @@
                             {tab === 'interaction' && (
                                 <div>
                                     <div style={{ display: 'flex', gap: '1rem' }}><div className="form-group" style={{ flex: 1 }}><label className="stat-label">指令前缀</label><input className="form-control" value={config.cmdPrefix ?? 'xa'} onChange={e => setConfig({ ...config, cmdPrefix: e.target.value })} /></div><div className="form-group" style={{ flex: 1 }}><label className="stat-label">查询指令</label><input className="form-control" value={config.cmdQuery ?? '查询到期'} onChange={e => setConfig({ ...config, cmdQuery: e.target.value })} /></div><div className="form-group" style={{ flex: 1 }}><label className="stat-label">续费指令</label><input className="form-control" value={config.cmdRenew ?? '续费'} onChange={e => setConfig({ ...config, cmdRenew: e.target.value })} /></div></div>
+                                    <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">指令触发到期提醒冷却时间（分钟）</label><input type="number" className="form-control" value={config.commandExpireNoticeCooldown ?? 30} onChange={e => setConfig({ ...config, commandExpireNoticeCooldown: parseInt(e.target.value) })} placeholder="默认30分钟" /><small style={{ color: '#888', fontSize: '0.85rem' }}>群已到期时，触发鸣潮指令会发送到期提醒，此设置控制冷却时间，避免频繁刷屏</small></div>
+                                    <div className="section-divider">加群管理</div>
+                                    <div className="form-group"><label className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><input type="checkbox" checked={config.autoHandleGroupInvite ?? true} onChange={e => setConfig({ ...config, autoHandleGroupInvite: e.target.checked })} style={{ width: 'auto', margin: 0 }} />自动处理加群邀请</label><small style={{ color: '#888', fontSize: '0.85rem' }}>开启后，机器人收到加群邀请时会自动判断：如果该群在授权列表中且未到期，则自动同意；否则自动拒绝</small></div>
                                     <div className="section-divider">消息测试</div>
                                     <div className="form-group"><label className="stat-label">测试群号</label><input className="form-control" type="number" value={testGroup} onChange={e => setTestGroup(e.target.value)} placeholder="输入群号进行测试" /></div>
                                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}><button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('expire')}>发送到期通知</button><button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('warning')}>发送预警通知</button><button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('renewal')}>发送续费指引</button><button className="btn btn-sm btn-secondary" onClick={() => handleTestMsg('quit')}>发送退群通知</button></div>
