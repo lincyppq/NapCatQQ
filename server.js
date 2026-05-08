@@ -88,6 +88,10 @@ let adminConfig = {
     cmdPrefix: 'xa',
     cmdQuery: '查询到期',
     cmdRenew: '续费',
+    // Command Expire Notice
+    commandExpireNoticeCooldown: 30, // 指令触发到期提醒的冷却时间（分钟）
+    // Auto Handle Group Invite
+    autoHandleGroupInvite: true, // 自动处理加群邀请
     uiTheme: {
         primaryColor: '#007AFF',
         backgroundImage: '',
@@ -155,7 +159,8 @@ const normalizeContract = (contract) => {
         notified: Boolean(contract.notified),
         preNotified: Boolean(contract.preNotified),
         lastDaysAdded: typeof contract.lastDaysAdded === 'number' ? contract.lastDaysAdded : null,
-        daysAddedAt: typeof contract.daysAddedAt === 'number' ? contract.daysAddedAt : null
+        daysAddedAt: typeof contract.daysAddedAt === 'number' ? contract.daysAddedAt : null,
+        lastCommandExpireNoticeAt: typeof contract.lastCommandExpireNoticeAt === 'number' ? contract.lastCommandExpireNoticeAt : null
     };
 };
 const normalizeBot = (bot) => {
@@ -191,6 +196,41 @@ const queueWrite = (filePath, data) => {
 };
 
 const saveAdminConfig = () => queueWrite(ADMIN_FILE, adminConfig);
+
+// --- 鸣潮功能指令识别函数 ---
+const isWutheringWavesCommand = (rawText, prefix, queryCmd, renewCmd) => {
+    const trimmed = rawText.trim();
+    if (!trimmed.startsWith(prefix)) return false;
+
+    // 排除查询到期和续费命令
+    if (trimmed.startsWith(queryCmd) || trimmed.startsWith(renewCmd)) return false;
+
+    // 去掉前缀，得到命令主体
+    const commandBody = trimmed.substring(prefix.length);
+    if (!commandBody) return false;
+
+    // 精确匹配的常用命令
+    const exactCommands = [
+        '登录', '绑定', '绑定特征码', '切换特征码', '查看特征码', '获取token', '添加token',
+        '卡片', '练度统计', '体力', '日历', '兑换码',
+        '深塔', '深塔战略', '深塔出场率', '冥歌海墟', '矩阵',
+        '签到', '签到日历', '开启自动签到', '推送邮箱', '开启推送', '推送阈值',
+        '帮助', '菜单', '指令'
+    ];
+    if (exactCommands.includes(commandBody)) return true;
+
+    // 前缀匹配的命令类型
+    const prefixCommands = [
+        '抽卡', '角色', '武器', '声骸', '公告', '推送', '绑定', '深塔', '矩阵', '冥歌'
+    ];
+    if (prefixCommands.some(cmd => commandBody.startsWith(cmd))) return true;
+
+    // 包含或结尾匹配
+    if (commandBody.includes('面板') || commandBody.endsWith('面板')) return true;
+    if (commandBody.includes('排行') || commandBody.endsWith('排行')) return true;
+
+    return false;
+};
 
 if (adminConfig.password && !adminConfig.passwordHash) {
     adminConfig.passwordHash = bcrypt.hashSync(adminConfig.password, 10);
@@ -541,6 +581,202 @@ wss.on('connection', (ws, req) => {
                         ws.send(JSON.stringify({ action: 'send_group_msg', params: { group_id: groupId, message: adminConfig.renewalMessage } }));
                         writeLog('BOT', '自动回复(续费)', `回复群 ${groupId}: 续费指引`);
                     }
+
+                    // --- 鸣潮功能指令触发到期提醒 ---
+                    if (isWutheringWavesCommand(rawText, prefix, queryCmd, renewCmd)) {
+                        const botData = botsDB[selfId];
+                        if (!botData || botData.deleted) return;
+
+                        const contract = botData.contracts?.find(c => String(c.groupId) === String(groupId) && !c.deleted);
+                        if (!contract) return; // 无授权记录，不处理
+
+                        // 检查是否已到期
+                        if (!contract.expireTime) return; // 永久授权，不处理
+                        const now = Date.now();
+                        if (contract.expireTime > now) return; // 未到期，不处理
+
+                        // 检查冷却时间（从后台配置读取，单位：分钟）
+                        const cooldownMinutes = adminConfig.commandExpireNoticeCooldown || 30;
+                        const cooldownMs = cooldownMinutes * 60 * 1000;
+                        if (contract.lastCommandExpireNoticeAt && (now - contract.lastCommandExpireNoticeAt < cooldownMs)) {
+                            return; // 冷却中，不重复发送
+                        }
+
+                        // 发送到期通知（只发送到期通知内容，不拼接续费指引，与原有自动到期通知逻辑保持一致）
+                        const notifyMsg = adminConfig.defaultNotifyMessage || '[系统通知] 本群机器人服务已到期，请联系管理员续费。';
+
+                        ws.send(JSON.stringify({ action: 'send_group_msg', params: { group_id: groupId, message: notifyMsg } }));
+                        writeLog('BOT', '指令触发到期提醒', `群 ${groupId} 触发鸣潮指令，发送到期通知`);
+
+                        // 更新冷却时间
+                        contract.lastCommandExpireNoticeAt = now;
+                        queueWrite(DB_FILE, botsDB);
+                    }
+                }
+
+                // --- 自动处理加群邀请（智能同步授权 + 防薅羊毛）---
+                if (msg.post_type === 'request' && msg.request_type === 'group' && msg.sub_type === 'invite') {
+                    if (!adminConfig.autoHandleGroupInvite) return; // 未开启自动处理
+
+                    const botData = botsDB[selfId];
+                    if (!botData || botData.deleted) return;
+
+                    const groupId = String(msg.group_id);
+                    const flag = msg.flag;
+                    const inviterUid = msg.user_id;
+
+                    let approve = false;
+                    let reason = '';
+                    let foundContract = null;
+
+                    // 1. 先检查当前机器人是否有该群的授权
+                    let contract = botData.contracts?.find(c => String(c.groupId) === groupId && !c.deleted);
+
+                    // 2. 如果当前机器人没有授权，检查其他机器人是否有该群的授权（跨机器人同步）
+                    if (!contract) {
+                        for (const otherId in botsDB) {
+                            if (otherId === String(selfId)) continue; // 跳过自己
+                            const otherBot = botsDB[otherId];
+                            if (otherBot.deleted) continue;
+
+                            const otherContract = otherBot.contracts?.find(c => String(c.groupId) === groupId && !c.deleted);
+                            if (otherContract) {
+                                foundContract = otherContract;
+                                break;
+                            }
+                        }
+
+                        // 如果找到其他机器人的授权，同步到当前机器人
+                        if (foundContract) {
+                            contract = {
+                                id: genId(),
+                                groupId: foundContract.groupId,
+                                groupName: foundContract.groupName,
+                                expireTime: foundContract.expireTime,
+                                deleted: false,
+                                leftGroup: false,
+                                notified: false,
+                                preNotified: false,
+                                lastDaysAdded: null,
+                                daysAddedAt: null,
+                                lastCommandExpireNoticeAt: null
+                            };
+                            botData.contracts.push(contract);
+                            writeLog('BOT', '自动同步授权', `从其他机器人同步群 ${groupId} 的授权到机器人 ${selfId}`);
+                        }
+                    }
+
+                    // 3. 防薅羊毛：检查该群是否已有其他机器人在群里
+                    let hasOtherBotInGroup = false;
+                    for (const otherId in botsDB) {
+                        if (otherId === String(selfId)) continue; // 跳过自己
+                        const otherBot = botsDB[otherId];
+                        if (otherBot.deleted) continue;
+
+                        const otherContract = otherBot.contracts?.find(c => String(c.groupId) === groupId && !c.deleted);
+                        // 如果其他机器人有该群的授权，且没有标记为已退群，说明可能在群里
+                        if (otherContract && !otherContract.leftGroup) {
+                            hasOtherBotInGroup = true;
+                            break;
+                        }
+                    }
+
+                    // 4. 判断是否同意邀请
+                    if (!contract) {
+                        // 无授权记录（任何机器人都没有），拒绝
+                        approve = false;
+                        reason = '该群未在任何机器人的授权列表中';
+                    } else if (hasOtherBotInGroup) {
+                        // 已有其他机器人在群里，拒绝（防薅羊毛）
+                        approve = false;
+                        reason = '该群已有其他机器人，禁止重复加群';
+                    } else if (!contract.expireTime) {
+                        // 永久授权，同意
+                        approve = true;
+                        reason = '永久授权';
+                    } else {
+                        // 检查是否到期
+                        const now = Date.now();
+                        if (contract.expireTime > now) {
+                            approve = true;
+                            const days = Math.floor((contract.expireTime - now) / (1000 * 60 * 60 * 24));
+                            reason = `授权有效，剩余${days}天`;
+                        } else {
+                            approve = false;
+                            reason = '授权已过期';
+                        }
+                    }
+
+                    // 5. 发送处理请求
+                    ws.send(JSON.stringify({
+                        action: 'set_group_add_request',
+                        params: {
+                            flag: flag,
+                            sub_type: 'invite',
+                            approve: approve
+                        }
+                    }));
+
+                    // 6. 如果同意了，保存数据（标记该群已被当前机器人占用）
+                    if (approve) {
+                        queueWrite(DB_FILE, botsDB);
+                    }
+
+                    writeLog('BOT', approve ? '同意加群邀请' : '拒绝加群邀请',
+                        `机器人: ${selfId}, 群: ${groupId}, 邀请人: ${inviterUid}, 原因: ${reason}`);
+                }
+
+                // --- 监听退群通知（自动标记 leftGroup）---
+                if (msg.post_type === 'notice' && msg.notice_type === 'group_decrease' && msg.sub_type === 'leave') {
+                    const botData = botsDB[selfId];
+                    if (!botData || botData.deleted) return;
+
+                    const groupId = String(msg.group_id);
+                    const userId = String(msg.user_id);
+
+                    // 如果是机器人自己退群
+                    if (userId === String(selfId)) {
+                        const contract = botData.contracts?.find(c => String(c.groupId) === groupId && !c.deleted);
+                        if (contract) {
+                            contract.leftGroup = true;
+                            queueWrite(DB_FILE, botsDB);
+                            writeLog('BOT', '检测到退群', `机器人 ${selfId} 已退出群 ${groupId}，标记 leftGroup=true`);
+                        }
+                    }
+                }
+
+                // --- 监听被踢出群通知 ---
+                if (msg.post_type === 'notice' && msg.notice_type === 'group_decrease' && msg.sub_type === 'kick_me') {
+                    const botData = botsDB[selfId];
+                    if (!botData || botData.deleted) return;
+
+                    const groupId = String(msg.group_id);
+
+                    const contract = botData.contracts?.find(c => String(c.groupId) === groupId && !c.deleted);
+                    if (contract) {
+                        contract.leftGroup = true;
+                        queueWrite(DB_FILE, botsDB);
+                        writeLog('BOT', '检测到被踢出群', `机器人 ${selfId} 被踢出群 ${groupId}，标记 leftGroup=true`);
+                    }
+                }
+
+                // --- 监听进群通知（重置 leftGroup）---
+                if (msg.post_type === 'notice' && msg.notice_type === 'group_increase' && msg.sub_type === 'approve') {
+                    const botData = botsDB[selfId];
+                    if (!botData || botData.deleted) return;
+
+                    const groupId = String(msg.group_id);
+                    const userId = String(msg.user_id);
+
+                    // 如果是机器人自己进群
+                    if (userId === String(selfId)) {
+                        const contract = botData.contracts?.find(c => String(c.groupId) === groupId && !c.deleted);
+                        if (contract) {
+                            contract.leftGroup = false;
+                            queueWrite(DB_FILE, botsDB);
+                            writeLog('BOT', '检测到进群', `机器人 ${selfId} 已进入群 ${groupId}，标记 leftGroup=false`);
+                        }
+                    }
                 }
             } catch (e) { }
         });
@@ -677,6 +913,8 @@ const sanitizeAdminUpdate = (input = {}) => {
         'cmdPrefix',
         'cmdQuery',
         'cmdRenew',
+        'commandExpireNoticeCooldown',
+        'autoHandleGroupInvite',
         'uiTheme',
         'emailNotification'
     ]);
@@ -766,6 +1004,8 @@ app.get('/api/admin/config', authenticateToken, (req, res) => {
         cmdPrefix: adminConfig.cmdPrefix,
         cmdQuery: adminConfig.cmdQuery,
         cmdRenew: adminConfig.cmdRenew,
+        commandExpireNoticeCooldown: adminConfig.commandExpireNoticeCooldown,
+        autoHandleGroupInvite: adminConfig.autoHandleGroupInvite,
         uiTheme: adminConfig.uiTheme,
         emailNotification: adminConfig.emailNotification
     });
