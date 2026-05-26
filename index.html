@@ -486,12 +486,13 @@
         const GlobalSearchModal = ({ bots, onClose, onSelect }) => {
             const [term, setTerm] = useState('');
             const results = useMemo(() => {
-                if (!term) return [];
+                const trimmedTerm = term.trim();
+                if (!trimmedTerm) return [];
                 const list = [];
                 bots.forEach(bot => {
                     if (bot.contracts) {
                         bot.contracts.forEach(c => {
-                            if (String(c.groupId).includes(term) || (c.groupName && c.groupName.includes(term))) {
+                            if (String(c.groupId).includes(trimmedTerm) || (c.groupName && c.groupName.includes(trimmedTerm))) {
                                 list.push({ ...c, botName: bot.name, botId: bot.id, pausedAt: bot.pausedAt });
                             }
                         });
@@ -510,7 +511,12 @@
                                 {results.map(item => (
                                     <div key={item.id} className="contract-item stagger-item" style={{ cursor: 'pointer' }} onClick={() => { onSelect(item.botId, item); onClose(); }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}><img className="group-avatar" src={`https://p.qlogo.cn/gh/${item.groupId}/${item.groupId}/100`} /><div><div style={{ fontWeight: 600 }}>{item.groupName || item.groupId}</div><div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{item.botName} · {item.groupId}</div></div></div>
-                                        {(() => { const nowTs = item.pausedAt || Date.now(); const expired = item.expireTime < nowTs; return <div style={{ fontSize: '0.8rem', color: expired ? 'var(--danger)' : 'var(--success)' }}>{expired ? '已过期' : '生效中'}</div>; })()}
+                                        {(() => {
+                                            if (!item.expireTime) return <div style={{ fontSize: '0.8rem', color: 'var(--success)' }}>永久授权</div>;
+                                            const nowTs = item.pausedAt || Date.now();
+                                            const expired = item.expireTime < nowTs;
+                                            return <div style={{ fontSize: '0.8rem', color: expired ? 'var(--danger)' : 'var(--success)' }}>{expired ? '已过期' : '生效中'}</div>;
+                                        })()}
                                     </div>
                                 ))}
                             </div>
@@ -785,7 +791,7 @@
 
             if (!config) return <div className="modal-overlay"><div className="modal-content" style={{ maxWidth: '500px', padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading settings...</div></div>;
 
-            const tabs = force ? ['security'] : ['personalization', 'interaction', 'notification', 'email', 'strategy', 'compensation', 'backup', 'security'];
+            const tabs = force ? ['security'] : ['personalization', 'interaction', 'notification', 'email', 'groupnotify', 'strategy', 'compensation', 'backup', 'security'];
 
             const handleSave = async () => {
                 setSaveStatus('Saving...');
@@ -836,7 +842,7 @@
                         <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '0 1rem', overflowX: 'auto' }}>
                             {tabs.map(t => (
                                 <div key={t} style={{ padding: '1rem', cursor: 'pointer', color: tab === t ? 'var(--primary)' : 'var(--text-secondary)', borderBottom: tab === t ? '2px solid var(--primary)' : 'none', whiteSpace: 'nowrap' }} onClick={() => setTab(t)}>{
-                                    { personalization: '个性化', interaction: '指令', notification: '通知模板', email: '邮件通知', strategy: '自动退群', compensation: '批量补偿', backup: '备份恢复', security: '安全' }[t]
+                                    { personalization: '个性化', interaction: '指令', notification: '通知模板', email: '邮件通知', groupnotify: '拉群通知', strategy: '自动退群', compensation: '批量补偿', backup: '备份恢复', security: '安全' }[t]
                                 }</div>
                             ))}
                         </div>
@@ -879,6 +885,22 @@
                                             <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">邮箱授权码</label><input className="form-control" type="password" value={config.emailNotification?.smtpPass ?? ''} onChange={e => setConfig({ ...config, emailNotification: { ...config.emailNotification, smtpPass: e.target.value } })} placeholder="授权码(不是登录密码)" /></div>
                                             <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">接收通知邮箱</label><input className="form-control" type="email" value={config.emailNotification?.recipientEmail ?? ''} onChange={e => setConfig({ ...config, emailNotification: { ...config.emailNotification, recipientEmail: e.target.value } })} placeholder="recipient@email.com" /></div>
                                             <button className="btn btn-primary" style={{ marginTop: '1rem', width: '100%' }} onClick={async () => { try { const res = await fetch(`${apiHost}/api/admin/test-email`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); const data = await res.json(); if (res.ok) toast.success(data.message || '测试邮件已发送'); else toast.error(data.error || '发送失败'); } catch (e) { toast.error('发送失败'); } }}>📧 发送测试邮件</button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            {tab === 'groupnotify' && (
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.05)', padding: '1rem', borderRadius: 'var(--radius-sm)', marginBottom: '1rem' }}><span>启用拉群通知</span><label className="switch"><input type="checkbox" checked={config.groupInviteNotification?.enabled ?? false} onChange={e => setConfig({ ...config, groupInviteNotification: { ...config.groupInviteNotification, enabled: e.target.checked } })} /><span className="slider"></span></label></div>
+                                    {config.groupInviteNotification?.enabled && (
+                                        <div style={{ animation: 'fadeIn 0.3s' }}>
+                                            <div style={{ padding: '0.75rem 1rem', background: 'rgba(0,122,255,0.1)', border: '1px solid rgba(0,122,255,0.3)', borderRadius: 'var(--radius-sm)', color: 'var(--primary)', marginBottom: '1rem', fontSize: '0.9rem' }}>💡 机器人被拉群后，会通过QQ私聊或群消息通知管理员，告知被谁拉的、成功还是失败</div>
+                                            <div className="form-group"><label className="stat-label">管理员QQ号</label><input className="form-control" value={config.groupInviteNotification?.adminQQ ?? ''} onChange={e => setConfig({ ...config, groupInviteNotification: { ...config.groupInviteNotification, adminQQ: e.target.value } })} placeholder="输入管理员QQ号" /></div>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', marginTop: '1rem' }}><span>私聊通知</span><label className="switch"><input type="checkbox" checked={config.groupInviteNotification?.notifyPrivate ?? true} onChange={e => setConfig({ ...config, groupInviteNotification: { ...config.groupInviteNotification, notifyPrivate: e.target.checked } })} /><span className="slider"></span></label></div>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', marginTop: '0.5rem' }}><span>群消息通知</span><label className="switch"><input type="checkbox" checked={config.groupInviteNotification?.notifyToGroup ?? false} onChange={e => setConfig({ ...config, groupInviteNotification: { ...config.groupInviteNotification, notifyToGroup: e.target.checked } })} /><span className="slider"></span></label></div>
+                                            {config.groupInviteNotification?.notifyToGroup && (
+                                                <div className="form-group" style={{ marginTop: '1rem' }}><label className="stat-label">通知群号</label><input className="form-control" value={config.groupInviteNotification?.notifyGroupId ?? ''} onChange={e => setConfig({ ...config, groupInviteNotification: { ...config.groupInviteNotification, notifyGroupId: e.target.value } })} placeholder="输入通知群号" /></div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
