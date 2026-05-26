@@ -16,6 +16,30 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// --- Logger with Timestamp ---
+const formatTimestamp = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hour = String(now.getHours()).padStart(2, '0');
+    const minute = String(now.getMinutes()).padStart(2, '0');
+    const second = String(now.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+};
+
+const log = (level, ...args) => {
+    const timestamp = formatTimestamp();
+    const prefix = `[${timestamp}] [${level}]`;
+    console.log(prefix, ...args);
+};
+
+const logger = {
+    log: (...args) => log('INFO', ...args),
+    error: (...args) => log('ERROR', ...args),
+    warn: (...args) => log('WARN', ...args)
+};
+
 // --- Configuration ---
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 23333;
 const JWT_SECRET_FILE = path.join(__dirname, 'jwt_secret.txt');
@@ -106,6 +130,14 @@ let adminConfig = {
         smtpUser: '',
         smtpPass: '',
         recipientEmail: ''
+    },
+    // Group Invite Notification
+    groupInviteNotification: {
+        enabled: false, // 是否启用拉群通知
+        adminQQ: '', // 管理员QQ号
+        notifyGroupId: '', // 通知群号（可选）
+        notifyPrivate: true, // 是否私聊通知
+        notifyToGroup: false // 是否群通知
     }
 };
 
@@ -121,7 +153,7 @@ if (fs.existsSync(ADMIN_FILE)) {
         // Remove obsolete fields
         delete adminConfig.monitorPorts;
         delete adminConfig.blacklist;
-    } catch (e) { console.error("Failed to read admin config"); }
+    } catch (e) { logger.error("读取管理员配置失败"); }
 } else {
     adminConfig.passwordHash = bcrypt.hashSync('admin123', 10);
     fs.writeFileSync(ADMIN_FILE, JSON.stringify(adminConfig, null, 2));
@@ -259,7 +291,7 @@ const recordLoginAttempt = (ip, success) => {
         record.count += 1;
         if (record.count >= 5) {
             record.blockedUntil = now + 15 * 60 * 1000;
-            console.warn(`IP ${ip} blocked due to too many failed login attempts.`);
+            logger.warn(`IP ${ip} 因多次登录失败被封禁`);
         }
         loginAttempts.set(ip, record);
     }
@@ -337,7 +369,7 @@ const sendOfflineEmail = async (botId, botName, reason = '连接断开') => {
         // Check if email notification is enabled and configured
         if (!emailConfig.enabled) return;
         if (!emailConfig.smtpUser || !emailConfig.smtpPass || !emailConfig.recipientEmail) {
-            console.warn('Email notification enabled but not fully configured');
+            logger.warn('邮件通知已启用但配置不完整');
             return;
         }
 
@@ -390,10 +422,10 @@ const sendOfflineEmail = async (botId, botName, reason = '连接断开') => {
         // Send email
         await transporter.sendMail(mailOptions);
         writeLog('SYSTEM', '邮件通知', `已发送掉线通知邮件: ${botName || botId} (${reason})`);
-        console.log(`✅ Offline email sent for bot ${botId} (${reason})`);
+        logger.log(`✅ 机器人 ${botId} 掉线邮件已发送 (${reason})`);
 
     } catch (error) {
-        console.error('Failed to send offline email:', error.message);
+        logger.error('发送掉线邮件失败:', error.message);
         writeLog('SYSTEM', '邮件发送失败', `发送失败: ${error.message}`);
     }
 };
@@ -476,7 +508,7 @@ wss.on('connection', (ws, req) => {
     const selfId = req.headers['x-self-id'] || req.headers['x-client-role'];
 
     if (selfId) {
-        console.log(`NapCat Connected: ${selfId}`);
+        logger.log(`NapCat 已连接: ${selfId}`);
         activeConnections.set(String(selfId), ws);
         ws.isAlive = true;
         ws.on('pong', () => {
@@ -503,7 +535,7 @@ wss.on('connection', (ws, req) => {
                 // Send email notification immediately on disconnect
                 const botName = botsDB[selfId].name || `Bot ${selfId}`;
                 sendOfflineEmail(String(selfId), botName).catch(err => {
-                    console.error('Email notification error:', err);
+                    logger.error('邮件通知错误:', err);
                 });
             }
             writeLog('BOT', '机器人下线', `账号 ${selfId} 已断开`);
@@ -520,12 +552,12 @@ wss.on('connection', (ws, req) => {
                     const currentCount = (botErrorCount.get(String(selfId)) || 0) + 1;
                     botErrorCount.set(String(selfId), currentCount);
 
-                    console.warn(`⚠️ Bot ${selfId} error detected (${currentCount}/3):`, msg.data?.errMsg || msg.message || 'Unknown error');
+                    logger.warn(`⚠️ 机器人 ${selfId} 检测到错误 (${currentCount}/3):`, msg.data?.errMsg || msg.message || '未知错误');
 
                     if (currentCount >= 3) {
                         const botName = botsDB[selfId]?.name || `Bot ${selfId}`;
                         sendOfflineEmail(String(selfId), botName, '连续发送失败').catch(err => {
-                            console.error('Email notification error:', err);
+                            logger.error('邮件通知错误:', err);
                         });
                         writeLog('BOT', '功能异常', `账号 ${selfId} 连续发送失败`);
                         botErrorCount.set(String(selfId), 0); // 重置计数
@@ -674,8 +706,9 @@ wss.on('connection', (ws, req) => {
                         if (otherBot.deleted) continue;
 
                         const otherContract = otherBot.contracts?.find(c => String(c.groupId) === groupId && !c.deleted);
-                        // 如果其他机器人有该群的授权，且没有标记为已退群，说明可能在群里
-                        if (otherContract && !otherContract.leftGroup) {
+                        // 如果其他机器人有该群的授权，且没有标记为已退群，且没有被暂停扣时，说明在群里
+                        // 增强判断：如果机器人被暂停扣时(pausedAt)，说明管理员认为它有问题，允许其他机器人进群
+                        if (otherContract && !otherContract.leftGroup && !otherBot.pausedAt) {
                             hasOtherBotInGroup = true;
                             break;
                         }
@@ -722,6 +755,36 @@ wss.on('connection', (ws, req) => {
                         queueWrite(DB_FILE, botsDB);
                     }
 
+                    // 7. 发送拉群通知给管理员
+                    if (adminConfig.groupInviteNotification?.enabled) {
+                        const notifyConfig = adminConfig.groupInviteNotification;
+                        const adminQQ = notifyConfig.adminQQ;
+                        const statusText = approve ? '✅ 同意进群' : '❌ 拒绝进群';
+                        const notifyMessage = `【拉群通知】\n机器人: ${selfId}\n群号: ${groupId}\n邀请人: ${inviterUid}\n处理结果: ${statusText}\n原因: ${reason}`;
+
+                        // 私聊通知
+                        if (notifyConfig.notifyPrivate && adminQQ) {
+                            ws.send(JSON.stringify({
+                                action: 'send_private_msg',
+                                params: {
+                                    user_id: parseInt(adminQQ),
+                                    message: notifyMessage
+                                }
+                            }));
+                        }
+
+                        // 群通知
+                        if (notifyConfig.notifyToGroup && notifyConfig.notifyGroupId) {
+                            ws.send(JSON.stringify({
+                                action: 'send_group_msg',
+                                params: {
+                                    group_id: parseInt(notifyConfig.notifyGroupId),
+                                    message: notifyMessage
+                                }
+                            }));
+                        }
+                    }
+
                     writeLog('BOT', approve ? '同意加群邀请' : '拒绝加群邀请',
                         `机器人: ${selfId}, 群: ${groupId}, 邀请人: ${inviterUid}, 原因: ${reason}`);
                 }
@@ -760,7 +823,7 @@ wss.on('connection', (ws, req) => {
                     }
                 }
 
-                // --- 监听进群通知（重置 leftGroup）---
+                // --- 监听进群通知（重置 leftGroup + 授权转移）---
                 if (msg.post_type === 'notice' && msg.notice_type === 'group_increase' && msg.sub_type === 'approve') {
                     const botData = botsDB[selfId];
                     if (!botData || botData.deleted) return;
@@ -775,6 +838,47 @@ wss.on('connection', (ws, req) => {
                             contract.leftGroup = false;
                             queueWrite(DB_FILE, botsDB);
                             writeLog('BOT', '检测到进群', `机器人 ${selfId} 已进入群 ${groupId}，标记 leftGroup=false`);
+                        }
+
+                        // 授权转移：检查是否有其他被暂停的机器人有该群的授权
+                        for (const otherId in botsDB) {
+                            if (otherId === String(selfId)) continue;
+                            const otherBot = botsDB[otherId];
+                            if (!otherBot.pausedAt || otherBot.deleted) continue; // 只处理被暂停的机器人
+
+                            const otherContract = otherBot.contracts?.find(c => String(c.groupId) === groupId && !c.deleted);
+                            if (otherContract) {
+                                // 找到了被暂停机器人的授权，转移到当前机器人（不管是否已退群）
+
+                                // 如果当前机器人已有该群授权，先删除旧的（用被暂停机器人的覆盖）
+                                if (contract) {
+                                    contract.deleted = true;
+                                    contract.deletedAt = Date.now();
+                                }
+
+                                // 创建新授权（从被暂停机器人转移过来）
+                                botData.contracts.push(normalizeContract({
+                                    id: genId(),
+                                    groupId: groupId,
+                                    groupName: otherContract.groupName,
+                                    expireTime: otherContract.expireTime,
+                                    deleted: false,
+                                    leftGroup: false,
+                                    notified: false,
+                                    preNotified: false,
+                                    lastDaysAdded: otherContract.lastDaysAdded,
+                                    daysAddedAt: otherContract.daysAddedAt,
+                                    lastCommandExpireNoticeAt: null
+                                }));
+
+                                // 删除原机器人的授权记录（真正的转移，不是复制）
+                                otherContract.deleted = true;
+                                otherContract.deletedAt = Date.now();
+
+                                queueWrite(DB_FILE, botsDB);
+                                writeLog('BOT', '授权自动转移', `群 ${groupId} 的授权从机器人 ${otherId}(已暂停) 转移到机器人 ${selfId}`);
+                                break; // 只转移一次
+                            }
                         }
                     }
                 }
@@ -833,18 +937,100 @@ setInterval(() => {
                 if (healthCheckPending.has(echo)) {
                     healthCheckPending.delete(echo);
                     const botName = botsDB[botId]?.name || `Bot ${botId}`;
-                    console.warn(`⚠️ Bot ${botId} health check failed (no response)`);
+                    logger.warn(`⚠️ 机器人 ${botId} 健康检查失败 (无响应)`);
                     sendOfflineEmail(String(botId), botName, '健康检查失败').catch(err => {
-                        console.error('Email notification error:', err);
+                        logger.error('邮件通知错误:', err);
                     });
                     writeLog('BOT', '健康检查失败', `账号 ${botId} 无响应`);
                 }
             }, 5000);
         } catch (err) {
-            console.error(`Health check send error for bot ${botId}:`, err.message);
+            logger.error(`机器人 ${botId} 健康检查发送错误:`, err.message);
         }
     });
 }, 2 * 60 * 1000); // 每2分钟检查一次
+
+// --- 方案C：长时间掉线检测（结合WebSocket状态 + 最后消息时间 + API响应）---
+const LONG_OFFLINE_THRESHOLD_MS = 30 * 60 * 1000; // 30分钟
+const longOfflineNotified = new Map(); // 记录已通知的机器人，避免重复通知
+
+setInterval(() => {
+    const now = Date.now();
+    Object.keys(botsDB).forEach(async botId => {
+        const bot = botsDB[botId];
+        if (!bot || bot.deleted || bot.pausedAt) return;
+
+        const ws = activeConnections.get(String(botId));
+        const lastSeen = bot.lastSeen || 0;
+        const offlineDuration = now - lastSeen;
+
+        // 检测条件：
+        // 1. WebSocket连接存在且状态为OPEN（伪在线）
+        // 2. 但最后收到消息的时间超过30分钟
+        if (ws && ws.readyState === WebSocket.OPEN && offlineDuration > LONG_OFFLINE_THRESHOLD_MS) {
+            // 进一步验证：尝试调用get_group_list API
+            const verifyEcho = `long_offline_verify_${botId}_${Date.now()}`;
+            let apiResponded = false;
+
+            const verifyPromise = new Promise((resolve) => {
+                pendingRequests.set(verifyEcho, {
+                    resolve: (data) => {
+                        apiResponded = true;
+                        // 检查返回的群列表是否为空或异常
+                        if (!data || !data.data || !Array.isArray(data.data) || data.data.length === 0) {
+                            resolve(false); // API返回异常，确认掉线
+                        } else {
+                            resolve(true); // API正常，可能只是消息少
+                        }
+                    }
+                });
+
+                try {
+                    ws.send(JSON.stringify({
+                        action: 'get_group_list',
+                        echo: verifyEcho
+                    }));
+                } catch (err) {
+                    resolve(false); // 发送失败，确认掉线
+                }
+
+                // 5秒超时
+                setTimeout(() => {
+                    if (pendingRequests.has(verifyEcho)) {
+                        pendingRequests.delete(verifyEcho);
+                        resolve(false); // 超时无响应，确认掉线
+                    }
+                }, 5000);
+            });
+
+            const isReallyOnline = await verifyPromise;
+
+            // 如果确认掉线，且未通知过（或上次通知超过2小时）
+            const lastNotified = longOfflineNotified.get(botId) || 0;
+            if (!isReallyOnline && (now - lastNotified > 2 * 60 * 60 * 1000)) {
+                const botName = bot.name || `Bot ${botId}`;
+                const offlineMinutes = Math.floor(offlineDuration / (60 * 1000));
+
+                sendOfflineEmail(String(botId), botName, `长时间无响应(${offlineMinutes}分钟)`).catch(err => {
+                    logger.error('邮件通知错误:', err);
+                });
+
+                writeLog('BOT', '长时间掉线检测', `机器人 ${botId} 已${offlineMinutes}分钟无响应，疑似掉线`);
+                longOfflineNotified.set(botId, now);
+            }
+
+            // 如果确认在线，清除通知记录
+            if (isReallyOnline) {
+                longOfflineNotified.delete(botId);
+            }
+        } else {
+            // 如果正常在线，清除通知记录
+            if (offlineDuration < LONG_OFFLINE_THRESHOLD_MS) {
+                longOfflineNotified.delete(botId);
+            }
+        }
+    });
+}, 5 * 60 * 1000); // 每5分钟检查一次
 
 const authenticateToken = (req, res, next) => {
     const token = req.headers['authorization']?.split(' ')[1];
@@ -888,7 +1074,7 @@ const ensureJwtSecret = (cb) => {
         rl.question('输入秘钥: ', (answer) => {
             const trimmed = String(answer || '').trim();
             if (!trimmed) {
-                console.log('JWT_SECRET is required.');
+                logger.log('需要配置 JWT_SECRET');
                 return ask();
             }
             JWT_SECRET = trimmed;
@@ -916,7 +1102,8 @@ const sanitizeAdminUpdate = (input = {}) => {
         'commandExpireNoticeCooldown',
         'autoHandleGroupInvite',
         'uiTheme',
-        'emailNotification'
+        'emailNotification',
+        'groupInviteNotification'
     ]);
     const out = {};
     Object.keys(input).forEach(key => {
@@ -938,6 +1125,16 @@ const sanitizeAdminUpdate = (input = {}) => {
                 smtpUser: String(input.emailNotification.smtpUser || ''),
                 smtpPass: String(input.emailNotification.smtpPass || ''),
                 recipientEmail: String(input.emailNotification.recipientEmail || '')
+            };
+            return;
+        }
+        if (key === 'groupInviteNotification' && input.groupInviteNotification && typeof input.groupInviteNotification === 'object') {
+            out.groupInviteNotification = {
+                enabled: Boolean(input.groupInviteNotification.enabled),
+                adminQQ: String(input.groupInviteNotification.adminQQ || ''),
+                notifyGroupId: String(input.groupInviteNotification.notifyGroupId || ''),
+                notifyPrivate: Boolean(input.groupInviteNotification.notifyPrivate ?? true),
+                notifyToGroup: Boolean(input.groupInviteNotification.notifyToGroup ?? false)
             };
             return;
         }
@@ -1007,7 +1204,8 @@ app.get('/api/admin/config', authenticateToken, (req, res) => {
         commandExpireNoticeCooldown: adminConfig.commandExpireNoticeCooldown,
         autoHandleGroupInvite: adminConfig.autoHandleGroupInvite,
         uiTheme: adminConfig.uiTheme,
-        emailNotification: adminConfig.emailNotification
+        emailNotification: adminConfig.emailNotification,
+        groupInviteNotification: adminConfig.groupInviteNotification
     });
 });
 
@@ -1081,7 +1279,7 @@ app.post('/api/admin/test-email', authenticateToken, async (req, res) => {
         res.json({ success: true, message: '测试邮件已发送，请检查收件箱' });
 
     } catch (error) {
-        console.error('Test email failed:', error.message);
+        logger.error('测试邮件发送失败:', error.message);
         writeLog('SYSTEM', '测试邮件失败', `错误: ${error.message}`);
         res.status(500).json({ error: `发送失败: ${error.message}` });
     }
@@ -1619,6 +1817,6 @@ cron.schedule('0 3 * * *', () => {
 
 ensureJwtSecret(() => {
     server.listen(PORT, '0.0.0.0', () => {
-        console.log(`NapCat Admin Panel: http://localhost:${PORT}/lincyppq`);
+        logger.log(`NapCat 管理面板: http://localhost:${PORT}/lincyppq`);
     });
 });
